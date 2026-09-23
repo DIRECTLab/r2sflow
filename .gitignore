@@ -164,3 +164,5 @@ cython_debug/
 logs/
 cache_*.pkl
 .ruff_cache/
+
+.vscode/

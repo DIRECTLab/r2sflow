@@ -6,18 +6,48 @@ import torch.nn.functional as F
 from torch import nn
 
 
-def get_hdl64e_linear_ray_angles(
-    H: int = 64, W: int = 2048, device: torch.device = "cpu"
+def get_linear_ray_angles(
+    H: int,
+    W: int,
+    h_up: float,
+    h_down: float,
+    w_left: float = 180,
+    w_right: float = -180,
+    device: torch.device = "cpu",
 ):
-    h_up, h_down = 3, -25
-    w_left, w_right = 180, -180
     elevation = 1 - torch.arange(H, device=device) / H  # [0, 1]
-    elevation = elevation * (h_up - h_down) + h_down  # [-25, 3]
+    elevation = elevation * (h_up - h_down) + h_down  # [h_down, h_up]
     azimuth = 1 - torch.arange(W, device=device) / W  # [0, 1]
     azimuth = azimuth * (w_left - w_right) + w_right  # [-180, 180]
     [elevation, azimuth] = torch.meshgrid([elevation, azimuth], indexing="ij")
     angles = torch.stack([elevation, azimuth])[None].deg2rad()
     return angles
+
+
+def get_hdl64e_linear_ray_angles(
+    H: int = 64, W: int = 2048, device: torch.device = "cpu"
+):
+    return get_linear_ray_angles(H, W, h_up=3, h_down=-25, device=device)
+
+
+def get_go2w_livox_linear_ray_angles(
+    H: int = 40, W: int = 512, device: torch.device = "cpu"
+):
+    """Ray angles of the simulated Livox on the Unitree Go2-W.
+
+    Measured from the rosbags: 40 rings at `elevation = 29.50 - 1.48 * ring`, so
+    the linear form above reproduces the ring table exactly when H is 40. Kept in
+    sync with `tools/rosbag_to_r2flow.py` and `r2flow/data/go2w_sim/go2w_sim.py`.
+    """
+    return get_linear_ray_angles(H, W, h_up=29.50, h_down=-29.70, device=device)
+
+
+# Spherical projection geometry per dataset, keyed by `cfg.data.dataset`.
+SPHERICAL_RAY_ANGLES = {
+    "kitti_raw": get_hdl64e_linear_ray_angles,
+    "kitti_360": get_hdl64e_linear_ray_angles,
+    "go2w_sim": get_go2w_livox_linear_ray_angles,
+}
 
 
 class LiDARUtility(nn.Module):

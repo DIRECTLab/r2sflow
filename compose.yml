@@ -26,9 +26,13 @@ services:
       - DISPLAY=${DISPLAY}
       - QT_X11_NO_MITSHM=1
       - KITTI360_ROOT=${KITTI360_ROOT:-/tmp/dummy_dataset}
+      - GO2W_SIM_ROOT=${GO2W_SIM_ROOT:-/tmp/dummy_dataset}
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
       - .:/home/docker/workspace
       - ${KITTI360_ROOT:-/tmp/dummy_dataset}:/home/docker/workspace/r2flow/data/kitti_360/dataset
+      # The repo is bind-mounted above, so r2flow/data/go2w_sim/dataset being a
+      # host symlink would dangle in here. Mount the scans over that path instead.
+      - ${GO2W_SIM_ROOT:-/tmp/dummy_dataset}:/home/docker/workspace/r2flow/data/go2w_sim/dataset
     shm_size: 16g
     entrypoint: ["bash"]

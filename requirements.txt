@@ -11,6 +11,11 @@ joblib==1.4.2
 kornia==0.7.0
 matplotlib==3.7.1
 numba==0.57.0
+# tensorboard 2.14 asks for protobuf>=3.19.6 with no upper bound, so a fresh
+# resolve grabs protobuf 7.x. Its hparams plugin still calls MessageToJson with
+# including_default_value_fields, which protobuf 5.26 renamed, so every page load
+# 500s. Nothing else here needs protobuf, so hold it on the last 4.x.
+protobuf==4.25.9
 pydantic==2.6.3
 rich==13.5.1
 scipy==1.11.1

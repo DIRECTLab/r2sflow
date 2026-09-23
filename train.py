@@ -144,13 +144,12 @@ def main(cfg: r2flow.utils.option.DefaultConfig):
 
     if "spherical" in cfg.data.projection:
         # Spherical projection
-        model.coords = r2flow.utils.lidar.get_hdl64e_linear_ray_angles(
-            *cfg.data.resolution
-        )
+        ray_angles = r2flow.utils.lidar.SPHERICAL_RAY_ANGLES[cfg.data.dataset]
+        model.coords = ray_angles(*cfg.data.resolution)
     elif "unfolding" in cfg.data.projection:
         # Scan unfolding
         model.coords = F.interpolate(
-            torch.load(f"data/{cfg.data.dataset}/unfolding_angles.pth"),
+            torch.load(f"r2flow/data/{cfg.data.dataset}/unfolding_angles.pth"),
             size=cfg.data.resolution,
             mode="nearest-exact",
         )

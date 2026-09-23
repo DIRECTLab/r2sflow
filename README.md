@@ -30,6 +30,8 @@ KITTI360_ROOT
     └── ...
 ```
 
+To train on LiDAR from a Unitree Go2-W simulator rosbag instead, see [this page](docs/GO2W_SIM.md).
+
 ### Dependencies
 
 Clone this repository:
