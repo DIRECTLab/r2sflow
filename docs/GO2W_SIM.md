@@ -127,7 +127,71 @@ Scans are ~100 MB per 128 s of recording. The split is a contiguous temporal cut
 On a 128 s recording this yields 202 scans from 2036 messages (162 train / 40
 test) at 0.88 mean pixel fill.
 
+## The other sensor: `--sensor l1`
+
+The Go2-W sim carries two lidars, and which one you train on decides how close
+you land to the real robot:
+
+|`--sensor`|topic|`base ->` mount|grid|
+|:-|:-|:-|:-|
+|`livox`|`/<robot>/livox/lidar`|x=+0.16, **z=+0.14**, pitch **+13°** (back, up)|40x500, −28°…+29°|
+|`l1`|`/<robot>/lidar`|x=**+0.29**, **z=−0.15**, pitch **−6.2°** (front, down)|64x512, −90°…0°|
+
+The real robot's `utlidar` is front-mounted and faces down, so `l1` is its
+counterpart; `livox` is a different sensor in a different place and its range
+statistics are nothing like the real one's. Projected onto the same grid:
+
+|domain|pixel fill|depth p10|depth p50|depth p90|
+|:-|:-|:-|:-|:-|
+|sim `l1`|0.809|0.25 m|**0.34 m**|1.58 m|
+|real L1|0.377|0.34 m|**0.44 m**|1.48 m|
+|sim `livox`|0.281|1.07 m|*1.92 m*|6.05 m|
+
+Two things differ from the Livox path. The L1's `ring` field is a **scan-order
+index, not an elevation row** (ring 0→80→160 maps to elevation −0°→51°→78°), so
+there is no ring table and the projection is purely spherical. And it sweeps a
+full 360° vertical circle, but only the **lower hemisphere** is kept — the real
+L1 reports nothing above the horizon, so the upper half would be sim-only signal.
+
+`min_depth` is 0.1 m rather than 0.5: about 64% of L1 returns fall inside 0.5 m,
+and while many are the chassis, many more are ground directly beneath the robot
+where ray density is highest. 0.1 m cuts most self-hits and keeps the ground.
+
+```bash
+.venv-rosbag/bin/python tools/rosbag_to_r2flow.py \
+    --bag-dir /mnt/fast/lidar_data/rosbag_20260917_204734_246468 \
+    --sensor l1 --out /mnt/fast/lidar_data/go2w_sim_l1_r2flow
+
+ln -sfn /mnt/fast/lidar_data/go2w_sim_l1_r2flow r2flow/data/go2w_sim_l1/dataset
+```
+
+This yields 158 scans (126 train / 32 test) at 0.796 mean fill. The preset also
+lowers `--coverage` to 0.90: rays are 0.635° apart in azimuth against 0.703°
+cells, so even a perfect rotation only reaches ~98% of columns, and demanding
+0.97 costs 30% of the scans and a 44% longer window to move fill 0.797 → 0.834.
+
+To put the **real** bag on the same grid, see
+[VISUALIZING_FLOW.md](VISUALIZING_FLOW.md) — the converter there defaults to this
+grid and flips z, because the `utlidar` frame is z-down.
+
+> [!WARNING]
+> Always pass `--h-up`/`--h-down` together with `--height`/`--width`. Setting
+> only the resolution resamples whatever elevation band is currently in force,
+> which looks plausible and is silently wrong.
+
 ## Training
+
+The L1 sensor (recommended — closest to the real robot):
+
+```bash
+accelerate launch train.py \
+    --dataset go2w_sim_l1 --projection spherical-64x512 --resolution 64 512 \
+    --min_depth 0.1 --max_depth 30.0 \
+    --batch_size 8 --loss_fn l2 --timestep_distribution uniform \
+    --output_dir logs/r2flow-go2w-l1-1rf
+```
+
+The back-mounted Livox:
 
 ```bash
 accelerate launch train.py \

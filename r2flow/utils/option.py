@@ -58,7 +58,7 @@ class TrainingConfig:
 
 @dataclass
 class DataConfig:
-    dataset: Literal["kitti_raw", "kitti_360", "go2w_sim"] = "kitti_360"
+    dataset: Literal["kitti_raw", "kitti_360", "go2w_sim", "go2w_sim_l1"] = "kitti_360"
     data_format: Literal["logscale", "inverse", "metric", "cartesian"] = "logscale"
     train_reflectance: bool = True
     projection: Literal[
@@ -69,6 +69,8 @@ class DataConfig:
         # go2w_sim, whose ray grid is 40 rings (see r2flow/data/go2w_sim)
         "spherical-40x512",
         "spherical-40x500",
+        # go2w_sim_l1: lower hemisphere (see r2flow/data/go2w_sim_l1)
+        "spherical-64x512",
     ] = "spherical-1024"
     resolution: Tuple[int, int] = (64, 1024)
     min_depth: float = 1.45

@@ -42,11 +42,26 @@ def get_go2w_livox_linear_ray_angles(
     return get_linear_ray_angles(H, W, h_up=29.50, h_down=-29.70, device=device)
 
 
+def get_go2w_l1_linear_ray_angles(
+    H: int = 64, W: int = 512, device: torch.device = "cpu"
+):
+    """Ray angles of the simulated Unitree L1 on the Go2-W.
+
+    The L1's `ring` field is a scan-order index, not an elevation row, so unlike
+    the Livox there is no measured table to match -- this is the chosen grid.
+    Only the lower hemisphere is covered: the front-mounted sensor faces down and
+    the real utlidar reports nothing above the horizon. Kept in sync with
+    `tools/rosbag_to_r2flow.py` (--sensor l1) and `r2flow/data/go2w_sim_l1`.
+    """
+    return get_linear_ray_angles(H, W, h_up=0.0, h_down=-90.0, device=device)
+
+
 # Spherical projection geometry per dataset, keyed by `cfg.data.dataset`.
 SPHERICAL_RAY_ANGLES = {
     "kitti_raw": get_hdl64e_linear_ray_angles,
     "kitti_360": get_hdl64e_linear_ray_angles,
     "go2w_sim": get_go2w_livox_linear_ray_angles,
+    "go2w_sim_l1": get_go2w_l1_linear_ray_angles,
 }
 
 

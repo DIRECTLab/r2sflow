@@ -34,5 +34,9 @@ services:
       # The repo is bind-mounted above, so r2flow/data/go2w_sim/dataset being a
       # host symlink would dangle in here. Mount the scans over that path instead.
       - ${GO2W_SIM_ROOT:-/tmp/dummy_dataset}:/home/docker/workspace/r2flow/data/go2w_sim/dataset
+      # Mount the whole data root at the same path it has on the host, so any
+      # r2flow/data/*/dataset symlink pointing into it resolves in here too.
+      # Read-only: the converters run on the host, the container only reads.
+      - ${LIDAR_DATA_ROOT:-/tmp/dummy_dataset}:${LIDAR_DATA_ROOT:-/tmp/dummy_dataset}:ro
     shm_size: 16g
     entrypoint: ["bash"]

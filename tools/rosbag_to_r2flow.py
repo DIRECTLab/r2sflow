@@ -32,7 +32,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
-from rosbags.highlevel import AnyReader
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import bag_io
+from bag_io import decode_pointcloud
+from bag_io import stamp_seconds as _stamp_seconds
+from lidar_grid import RayGrid
 
 # =====================================================================================
 # Sensor geometry
@@ -49,9 +55,6 @@ H_DEFAULT = 40
 W_DEFAULT = 500
 H_UP = 29.50
 H_DOWN = -29.70
-
-# PointCloud2 datatype enum -> numpy dtype
-_PF_DTYPE = {1: "i1", 2: "u1", 3: "i2", 4: "u2", 5: "i4", 6: "u4", 7: "f4", 8: "f8"}
 
 
 # =====================================================================================
@@ -111,14 +114,10 @@ class PoseTrack:
         return self.time[0] <= t <= self.time[-1]
 
 
-def _stamp_seconds(header) -> float:
-    return float(header.stamp.sec) + float(header.stamp.nanosec) * 1e-9
-
-
 def read_tf(bags: list[Path], parent: str, child: str) -> PoseTrack:
     """Collect every `/tf` sample of `parent -> child` into a PoseTrack."""
     time, trans, quat = [], [], []
-    with AnyReader(bags) as reader:
+    with bag_io.open_reader(bags, "ros1_noetic") as reader:
         conns = [c for c in reader.connections if c.topic == "/tf"]
         if not conns:
             raise SystemExit(f"no /tf topic in {[b.name for b in bags]}")
@@ -143,7 +142,7 @@ def read_tf(bags: list[Path], parent: str, child: str) -> PoseTrack:
 def read_tf_static(bags: list[Path], parent: str, child: str) -> np.ndarray:
     """Last-wins lookup of a `/tf_static` transform -> (4, 4)."""
     found = None
-    with AnyReader(bags) as reader:
+    with bag_io.open_reader(bags, "ros1_noetic") as reader:
         conns = [c for c in reader.connections if c.topic == "/tf_static"]
         for conn, _, raw in reader.messages(connections=conns):
             for tf in reader.deserialize(raw, conn.msgtype).transforms:
@@ -160,49 +159,74 @@ def read_tf_static(bags: list[Path], parent: str, child: str) -> np.ndarray:
 
 
 # =====================================================================================
-# PointCloud2 decoding
+# Point handling
 # =====================================================================================
-def decode_pointcloud(msg) -> np.ndarray:
-    """PointCloud2 -> structured array over its own fields (zero-copy view)."""
-    if msg.is_bigendian:
-        raise SystemExit("big-endian PointCloud2 is not supported")
-    fields = [f for f in msg.fields if f.datatype in _PF_DTYPE]
-    dtype = np.dtype(
-        {
-            "names": [f.name for f in fields],
-            "formats": [_PF_DTYPE[f.datatype] for f in fields],
-            "offsets": [f.offset for f in fields],
-            "itemsize": msg.point_step,
-        }
-    )
-    return np.frombuffer(msg.data, dtype=dtype, count=msg.width * msg.height)
-
-
 def xyzi_of(points: np.ndarray) -> np.ndarray:
     """Structured array -> (N, 4) float64 [x, y, z, intensity], finite rows only."""
-    intensity = points["intensity"] if "intensity" in points.dtype.names else np.zeros(len(points))
-    out = np.stack(
-        [points["x"], points["y"], points["z"], intensity], axis=1
-    ).astype(np.float64)
-    return out[np.isfinite(out).all(axis=1)]
+    xyz, intensity = bag_io.as_xyzi(points)
+    return np.concatenate([xyz, intensity[:, None]], axis=1)
 
 
-# =====================================================================================
-# Projection (fill statistics only; the dataset builder owns the real projection)
-# =====================================================================================
-def grid_indices(xyz: np.ndarray, H: int, W: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Nearest-ray-cell indices under the repo's azimuth convention.
+def grid_indices(
+    xyz: np.ndarray, grid: RayGrid
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Nearest-ray-cell indices; see lidar_grid.RayGrid for the convention.
 
-    Column 0 is azimuth +180 deg and columns advance clockwise, matching
-    `get_hdl64e_linear_ray_angles`. Returns (row, col, valid).
+    Used here only for coverage bookkeeping and fill statistics -- the dataset
+    builder does the projection that actually reaches the model.
     """
-    depth = np.linalg.norm(xyz, axis=1)
-    safe = np.maximum(depth, 1e-9)
-    elevation = np.degrees(np.arcsin((xyz[:, 2] / safe).clip(-1.0, 1.0)))
-    azimuth = np.degrees(np.arctan2(xyz[:, 1], xyz[:, 0]))
-    row = np.rint((H_UP - elevation) / ((H_UP - H_DOWN) / H)).astype(np.int64)
-    col = np.mod(np.rint((180.0 - azimuth) / (360.0 / W)).astype(np.int64), W)
-    return row, col, (row >= 0) & (row < H) & (depth > 0)
+    return grid.row_col(xyz)
+
+
+# =====================================================================================
+# Sensor presets
+# =====================================================================================
+# The Go2-W sim carries two lidars. They need different ray grids, so rather than
+# make the caller remember six numbers each time, name them.
+#
+# `livox` is the back-mounted Livox (base -> livox_frame: x=+0.16, z=+0.14,
+# pitch +13 deg): 40 uniform rings over a narrow band, ranges out to 70 m.
+#
+# `l1` is the front-mounted, downward L1 (base -> lidar: x=+0.29, z=-0.15,
+# pitch -6.2 deg), the counterpart of the real robot's utlidar. Its `ring` field
+# is a scan-order index, not an elevation row, so there is no ring table to use
+# and the projection is purely spherical. It sweeps a full 360 deg vertical
+# circle, but only the lower hemisphere is kept: the real L1 reports nothing
+# above the horizon, so the upper half would be sim-only signal the model could
+# never match. min_depth 0.1 keeps the dense ground returns directly beneath the
+# robot while cutting most chassis self-hits; max_depth is the sim's own clamp.
+SENSOR_PRESETS = {
+    "livox": {
+        "topic": "/go2w_sim_005/livox/lidar",
+        "sensor_frame": "go2w_sim_005/livox_frame",
+        "height": 40, "width": 500, "h_up": 29.50, "h_down": -29.70,
+        "min_depth": 0.5, "max_depth": 80.0, "intensity_scale": 100.0,
+    },
+    "l1": {
+        "topic": "/go2w_sim_005/lidar",
+        "sensor_frame": "go2w_sim_005/lidar",
+        "height": 64, "width": 512, "h_up": 0.0, "h_down": -90.0,
+        "min_depth": 0.1, "max_depth": 30.0, "intensity_scale": 100.0,
+        # Rays are 0.635 deg apart in azimuth against 0.703 deg cells, so even a
+        # perfect rotation only reaches ~98% of the columns. Demanding more just
+        # buys extra rotations: 0.97 costs 30% of the scans and a 44% longer
+        # accumulation window to move fill from 0.797 to 0.834.
+        "coverage": 0.90, "min_coverage": 0.85,
+    },
+}
+
+
+def apply_sensor_preset(parser, args, argv) -> None:
+    """Fill preset values, without clobbering anything given explicitly."""
+    given = set(argv if argv is not None else sys.argv[1:])
+    for key, value in SENSOR_PRESETS[args.sensor].items():
+        flag = "--" + key.replace("_", "-")
+        if flag not in given:
+            setattr(args, key, value)
+    print(f"sensor preset '{args.sensor}': topic={args.topic} "
+          f"grid={args.height}x{args.width} "
+          f"elevation[{args.h_down:.2f},{args.h_up:.2f}] "
+          f"depth[{args.min_depth},{args.max_depth}]")
 
 
 # =====================================================================================
@@ -237,7 +261,8 @@ def assemble(args) -> None:
     bin_dir = out_dir / "velodyne_points" / "data"
     bin_dir.mkdir(parents=True, exist_ok=True)
 
-    H, W = args.height, args.width
+    grid = RayGrid(args.height, args.width, args.h_up, args.h_down)
+    H, W = grid.height, grid.width
     window: list[tuple[float, np.ndarray]] = []  # (timestamp, (N, 4) xyzi)
     covered = np.zeros(W, dtype=bool)
     frames: list[dict] = []
@@ -274,7 +299,7 @@ def assemble(args) -> None:
         keep = (depth > args.min_depth) & (depth < args.max_depth)
         merged, depth = merged[keep], depth[keep]
 
-        row, col, valid = grid_indices(merged[:, :3], H, W)
+        row, col, valid = grid_indices(merged[:, :3], grid)
         occupied = np.zeros((H, W), dtype=bool)
         occupied[row[valid], col[valid]] = True
 
@@ -298,7 +323,7 @@ def assemble(args) -> None:
         )
         window, covered = [], np.zeros(W, dtype=bool)
 
-    with AnyReader(sensor_bags) as reader:
+    with bag_io.open_reader(sensor_bags, "ros1_noetic") as reader:
         conns = [c for c in reader.connections if c.topic == args.topic]
         if not conns:
             topics = sorted({c.topic for c in reader.connections})
@@ -317,7 +342,7 @@ def assemble(args) -> None:
                 continue
             n_msgs += 1
 
-            _, col, valid = grid_indices(pts[:, :3], H, W)
+            _, col, valid = grid_indices(pts[:, :3], grid)
             covered[col[valid]] = True
             window.append((stamp, pts))
 
@@ -345,10 +370,10 @@ def assemble(args) -> None:
                 "frame_id": args.sensor_frame,
                 "num_rings": H,
                 "native_azimuth_cells": W,
-                "h_up_deg": H_UP,
-                "h_down_deg": H_DOWN,
-                "elevation_top_deg": H_UP,
-                "elevation_step_deg": (H_UP - H_DOWN) / H,
+                "h_up_deg": grid.h_up,
+                "h_down_deg": grid.h_down,
+                "elevation_top_deg": grid.h_up,
+                "elevation_step_deg": grid.elevation_step,
                 "min_depth": args.min_depth,
                 "max_depth": args.max_depth,
                 "intensity_scale": args.intensity_scale,
@@ -412,15 +437,25 @@ def main(argv=None) -> None:
                      help="rings in the sensor's native grid (default: 40)")
     out.add_argument("--width", type=int, default=W_DEFAULT,
                      help="azimuth cells used for coverage bookkeeping (default: 500)")
+    out.add_argument("--h-up", type=float, default=H_UP,
+                     help="elevation of the top row, degrees (default: 29.50)")
+    out.add_argument("--h-down", type=float, default=H_DOWN,
+                     help="elevation one step below the bottom row (default: -29.70)")
     out.add_argument("--min-depth", type=float, default=0.5)
     out.add_argument("--max-depth", type=float, default=80.0)
     out.add_argument("--intensity-scale", type=float, default=100.0,
                      help="divisor mapping raw intensity to [0, 1] (default: 100.0)")
     out.add_argument("--test-fraction", type=float, default=0.2)
 
+    p.add_argument("--sensor", choices=("livox", "l1"), default=None,
+                   help="preset for the two simulated sensors; sets --topic, "
+                        "--sensor-frame, the ray grid and the depth/intensity ranges")
+
     args = p.parse_args(argv)
     if not args.bag_dir and not args.bags:
         p.error("pass either --bag-dir or --bags")
+    if args.sensor:
+        apply_sensor_preset(p, args, argv)
     assemble(args)
 
 
