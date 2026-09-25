@@ -22,6 +22,9 @@ scipy==1.11.1
 setuptools==69.5.1
 simple-parsing==0.1.5
 tensorboard==2.14.0
+# backbone source for the timestep-predictor feature extractor
+# (r2flow/metrics/tpred.py); we do not hand-roll the architecture
+timm==1.0.27
 torch==2.1.2
 torchcfm==1.0.5
 torchdiffeq==0.2.4

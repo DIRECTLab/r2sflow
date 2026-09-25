@@ -67,12 +67,75 @@ def encode(
     return torch.cat(channels, dim=1)
 
 
+def channel_sizes(data_format: str, train_reflectance: bool) -> list[int]:
+    """[range channels, reflectance channels], as inference.py:26 computes them."""
+    return [
+        3 if data_format == "cartesian" else 1,
+        1 if train_reflectance else 0,
+    ]
+
+
+def num_channels(data_format: str, train_reflectance: bool) -> int:
+    return sum(channel_sizes(data_format, train_reflectance))
+
+
 def split_channels(
     image: torch.Tensor, data_format: str, train_reflectance: bool
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Split a model tensor back into (range, reflectance) parts."""
-    sizes = [
-        3 if data_format == "cartesian" else 1,
-        1 if train_reflectance else 0,
-    ]
-    return torch.split(image, sizes, dim=1)
+    return torch.split(image, channel_sizes(data_format, train_reflectance), dim=1)
+
+
+@torch.no_grad()
+def decode(
+    lidar_utils,
+    image: torch.Tensor,
+    data_format: str,
+    train_reflectance: bool,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Inverse of `encode`: model tensor -> (metric depth, xyz, reflectance).
+
+    Mirrors `postprocess` in sample.py, including its leading `clamp(-1, 1)`.
+    Evaluation depends on that clamp: a generator's output is unconstrained and
+    will contain values no real scan ever has, which would otherwise be a free
+    tell for any feature extractor.
+    """
+    image = image.clamp(-1, 1)
+    range_image, reflectance = split_channels(image, data_format, train_reflectance)
+    metric_depth = lidar_utils.restore_metric_depth(range_image)
+    reflectance = lidar_utils.denormalize(reflectance)
+    if data_format == "cartesian":
+        xyz = range_image * lidar_utils.max_depth
+        xyz = xyz * lidar_utils.get_mask(metric_depth)
+    else:
+        xyz = lidar_utils.convert_metric_depth(metric_depth, format="cartesian")
+    return metric_depth, xyz, reflectance
+
+
+def make_flow_matcher(cfg):
+    """The same flow matcher train.py builds, from a checkpoint's cfg.
+
+    Deliberately not a hand-rolled `(1-t) * x_0 + t * x_1`: going through torchcfm
+    means the forward process used at evaluation is the one the model was trained
+    against by construction, including the `sigma` and formulation choices, rather
+    than a copy that can silently drift.
+    """
+    import torchcfm.conditional_flow_matching as cfm
+
+    if cfg.flow.formulation == "otcfm":
+        return cfm.ExactOptimalTransportConditionalFlowMatcher(sigma=cfg.flow.sigma)
+    return cfm.ConditionalFlowMatcher(sigma=cfg.flow.sigma)
+
+
+def noise_to_t0(
+    flow_matcher, x_1: torch.Tensor, x_0: torch.Tensor, t0: float
+) -> torch.Tensor:
+    """Apply the training forward process at one fixed timestep.
+
+    `t0=0` returns the noise untouched (the seed is fully discarded, so arms
+    seeded from different data are then the same distribution); `t0=1` returns the
+    data untouched.
+    """
+    t = torch.full((x_1.shape[0],), float(t0), device=x_1.device, dtype=x_1.dtype)
+    _, x_t, _ = flow_matcher.sample_location_and_conditional_flow(x0=x_0, x1=x_1, t=t)
+    return x_t

@@ -1,4 +1,5 @@
 import torch
+import torchvision
 from torch import nn
 
 from .models import minkowskinet, pointnet, rangenet, spvcnn
@@ -9,6 +10,23 @@ class Identity(nn.Identity):
         return x
 
 
+def _override_norm(preprocess, mean, std):
+    """Swap RangeNet's input normalisation for dataset-specific statistics.
+
+    The shipped values are SemanticKITTI's (range mean 12.12, std 12.32). On data
+    whose median range is ~1 m every pixel lands about a sigma below the mean and
+    the backbone runs far outside the distribution it was fitted on. Channel count
+    is taken from the existing preprocess because FRD is 5-channel and FRID is 4.
+    """
+    if preprocess is None or mean is None or std is None:
+        return preprocess
+    n = preprocess.num_channels
+    preprocess.transforms = torchvision.transforms.Normalize(
+        mean=list(mean)[:n], std=list(std)[:n]
+    )
+    return preprocess
+
+
 class FeatureExtractor(nn.Module):
     def __init__(
         self,
@@ -16,13 +34,24 @@ class FeatureExtractor(nn.Module):
         metrics=("FRD", "FRID", "FPD", "FSVD", "FPVD"),
         compile=False,
         WEIGHT_URL="https://github.com/kazuto1011/r2flow/releases/download/weights/",
+        scales=None,
     ):
         super().__init__()
         H, W = resolution
+        self.resolution = (H, W)
         self.metrics = metrics
         self.WEIGHT_URL = WEIGHT_URL
         self.compile = compile
         self.models = nn.ModuleDict()
+        # `scales` carries the depth-dependent constants (see metrics/features.py).
+        # Absent, every default below is the repo's original KITTI behaviour.
+        voxel_kwargs = {}
+        if scales is not None:
+            voxel_kwargs = dict(
+                voxel_size=scales.voxel_size,
+                min_depth=scales.min_depth,
+                max_depth=scales.max_depth,
+            )
 
         # =============================================================================
         # Image-based
@@ -34,6 +63,11 @@ class FeatureExtractor(nn.Module):
                 compile=self.compile,
             )
             _postprocess = rangenet.PostProcess()
+            _preprocess = _override_norm(
+                _preprocess,
+                None if scales is None else scales.rangenet_mean,
+                None if scales is None else scales.rangenet_std,
+            )
             self.models["FRD"] = nn.ModuleDict()
             self.models["FRD"]["extractor"] = _model
             self.models["FRD"]["preprocess"] = _preprocess
@@ -45,6 +79,11 @@ class FeatureExtractor(nn.Module):
                 compile=self.compile,
             )
             _postprocess = rangenet.PostProcess()
+            _preprocess = _override_norm(
+                _preprocess,
+                None if scales is None else scales.rangenet_mean,
+                None if scales is None else scales.rangenet_std,
+            )
             self.models["FRID"] = nn.ModuleDict()
             self.models["FRID"]["extractor"] = _model
             self.models["FRID"]["preprocess"] = _preprocess
@@ -72,6 +111,7 @@ class FeatureExtractor(nn.Module):
             _model, _preprocess, _postprocess = minkowskinet.pretrained_model(
                 self.WEIGHT_URL + "minkowskinet_lidm.tar.gz",
                 compile=False,
+                **voxel_kwargs,
             )
             self.models["FSVD"] = nn.ModuleDict()
             self.models["FSVD"]["extractor"] = _model
@@ -82,6 +122,7 @@ class FeatureExtractor(nn.Module):
             _model, _preprocess, _postprocess = spvcnn.pretrained_model(
                 self.WEIGHT_URL + "spvcnn_lidm.tar.gz",
                 compile=False,
+                **voxel_kwargs,
             )
             self.models["FPVD"] = nn.ModuleDict()
             self.models["FPVD"]["extractor"] = _model
