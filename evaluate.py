@@ -7,7 +7,6 @@ from pathlib import Path
 
 import datasets as ds
 import einops
-import natten
 import torch
 import torch.nn.functional as F
 from rich import print
@@ -38,7 +37,7 @@ def evaluate(args):
     torch.backends.cudnn.allow_tf32 = False
     torch.backends.cudnn.benchmark = True
     torch.backends.cudnn.enabled = True
-    natten.use_fused_na(True)
+    r2flow.models.hdit.enable_fused_na()
 
     cfg = r2flow.utils.option.DefaultConfig()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

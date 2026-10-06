@@ -3,7 +3,6 @@ from argparse import ArgumentParser
 from pathlib import Path
 
 import accelerate
-import natten
 import torch
 import torchdiffeq
 from joblib import Parallel, delayed
@@ -35,7 +34,7 @@ def sample(args):
     torch.backends.cudnn.allow_tf32 = False
     torch.backends.cudnn.benchmark = True
     torch.backends.cudnn.enabled = True
-    natten.use_fused_na(True)
+    r2flow.models.hdit.enable_fused_na()
 
     # =================================================================================
     # Loading model

@@ -2,7 +2,7 @@ import math
 import re
 from dataclasses import fields, is_dataclass
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 import torch
 from rich.console import Console
@@ -117,6 +117,63 @@ def _detect_diff(cfg_1: Any, cfg_2: Any, path: str = "") -> Dict[str, tuple]:
         elif av != bv:
             diffs[child_path] = (av, bv)
     return diffs
+
+
+# Same release as hubconf._get_url
+_RELEASE_URL = "https://github.com/kazuto1011/r2flow/releases/download/weights/{}.pth"
+
+
+def load_pretrained_weights(
+    model: torch.nn.Module, source: str, channel_index: List[int], cfg: Any = None
+):
+    """Load R2Flow weights into a freshly built HDiT, adapting the channel count.
+
+    `source` is a checkpoint path or a release name (e.g. "r2flow-kitti360-1rf").
+    Only the tokenizer conv and the detokenizer linear depend on the number of
+    image channels; they keep the checkpoint channels in `channel_index` (e.g.
+    [0] to keep depth from a depth+reflectance model). The `coords` buffer is
+    skipped since the caller sets the target sensor's ray angles. Any other
+    mismatch raises instead of silently loading a partial model.
+    """
+    from .option import DefaultConfig
+
+    if Path(source).exists():
+        ckpt = torch.load(source, map_location="cpu")
+    else:
+        ckpt = torch.hub.load_state_dict_from_url(
+            _RELEASE_URL.format(source), map_location="cpu"
+        )
+    if cfg is not None:
+        show_diff(DefaultConfig(**ckpt["cfg"]), cfg)
+
+    src = dict(ckpt["weights"])
+    src.pop("coords", None)
+    dst = model.state_dict()
+    if set(src) != set(dst) - {"coords"}:
+        raise ValueError(
+            f"key mismatch: missing {sorted(set(dst) - set(src) - {'coords'})}, "
+            f"unexpected {sorted(set(src) - set(dst))}"
+        )
+
+    num_patch = model.patch_size[0] * model.patch_size[1]
+    sliced = []
+    for key, value in src.items():
+        if value.shape == dst[key].shape:
+            continue
+        if key == "tokenizer.0.weight":  # (D, C, P1, P2)
+            value = value[:, channel_index]
+        elif key == "detokenizer.1.weight":  # (P1 * P2 * C, D), laid out (P1 P2 C)
+            value = value.view(num_patch, -1, value.shape[-1])[:, channel_index]
+            value = value.reshape(-1, value.shape[-1])
+        if value.shape != dst[key].shape:
+            raise ValueError(
+                f"{key}: checkpoint {tuple(src[key].shape)} vs model {tuple(dst[key].shape)}"
+            )
+        src[key] = value
+        sliced.append(key)
+
+    model.load_state_dict(src, strict=False)  # strict apart from the skipped coords
+    print(f"Loaded {len(src):,} tensors from {source} (channel-sliced: {sliced or 'none'})")
 
 
 def show_diff(last_cfg: Any, current_cfg: Any):

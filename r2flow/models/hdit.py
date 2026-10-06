@@ -2,7 +2,8 @@
 # This code is based on:
 # https://github.com/crowsonkb/k-diffusion/blob/master/k_diffusion/models/image_transformer_v2.py
 #
-# Call `natten.use_fused_na(True)` for acceleration if running on GPUs.
+# Call `enable_fused_na()` for acceleration if running on GPUs (natten < 0.20;
+# newer natten is always fused).
 # =============================================================================
 
 import math
@@ -158,6 +159,20 @@ class GlobalSelfAttentionBlock(nn.Module):
         return f"head_dim={self.head_dim}, num_heads={self.num_heads}"
 
 
+def _use_fused_na() -> bool:
+    # natten >= 0.20 dropped the unfused na2d_qk/na2d_av ops and the
+    # use_fused_na toggle; na2d (fused) is the only path there.
+    if not hasattr(natten.functional, "na2d_qk"):
+        return True
+    return natten.context.is_fna_enabled()
+
+
+def enable_fused_na():
+    """Turn on fused neighborhood attention where natten still has the toggle."""
+    if hasattr(natten, "use_fused_na"):
+        natten.use_fused_na(True)
+
+
 class CircularNeighborhoodSelfAttentionBlock(GlobalSelfAttentionBlock):
     def __init__(
         self,
@@ -198,7 +213,7 @@ class CircularNeighborhoodSelfAttentionBlock(GlobalSelfAttentionBlock):
     ) -> torch.Tensor:
         h = self.norm(x, emb)
         qkv = self.qkv_proj(h)
-        if natten.context.is_fna_enabled():
+        if _use_fused_na():
             q, k, v = einops.rearrange(
                 qkv, "B H W (T N D) -> T B H W N D", T=3, D=self.head_dim
             )

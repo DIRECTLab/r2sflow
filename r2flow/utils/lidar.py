@@ -56,12 +56,25 @@ def get_go2w_l1_linear_ray_angles(
     return get_linear_ray_angles(H, W, h_up=0.0, h_down=-90.0, device=device)
 
 
+def get_go2w_nav_linear_ray_angles(
+    H: int = 64, W: int = 1024, device: torch.device = "cpu"
+):
+    """Ray angles of the simulated navigation scans (`/registered_scan`).
+
+    Measured in the sensor frame, the scans span about -24..+11 deg. 64 x 1024
+    matches KITTI-360 so the pretrained R2Flow weights load as-is. Kept in sync
+    with `tools/ros2bag_registered_to_r2flow.py` and `r2flow/data/go2w_nav_sim`.
+    """
+    return get_linear_ray_angles(H, W, h_up=12.0, h_down=-24.0, device=device)
+
+
 # Spherical projection geometry per dataset, keyed by `cfg.data.dataset`.
 SPHERICAL_RAY_ANGLES = {
     "kitti_raw": get_hdl64e_linear_ray_angles,
     "kitti_360": get_hdl64e_linear_ray_angles,
     "go2w_sim": get_go2w_livox_linear_ray_angles,
     "go2w_sim_l1": get_go2w_l1_linear_ray_angles,
+    "go2w_nav_sim": get_go2w_nav_linear_ray_angles,
 }
 
 

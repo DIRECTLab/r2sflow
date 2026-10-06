@@ -40,6 +40,9 @@ def main(cfg: r2flow.utils.option.DefaultConfig):
     # =================================================================================
 
     is_finetuning = cfg.finetuning.init_ckpt is not None
+    assert not (
+        is_finetuning and cfg.finetuning.init_weights is not None
+    ), "init_ckpt (reflow) and init_weights (1-RF from pretrained) are exclusive"
     if is_finetuning:
         assert Path(cfg.finetuning.init_ckpt).exists()
         assert cfg.finetuning.sample_dir is not None
@@ -141,6 +144,16 @@ def main(cfg: r2flow.utils.option.DefaultConfig):
             )
         else:
             raise ValueError(f"Unknown: {cfg.model.architecture}")
+
+        if cfg.finetuning.init_weights is not None:
+            # Before model.coords and the EMA copy, so both start from these weights
+            assert cfg.model.architecture == "nat_hdit", "init_weights supports HDiT"
+            r2flow.utils.training.load_pretrained_weights(
+                model,
+                cfg.finetuning.init_weights,
+                channel_index=list(range(sum(channels))),
+                cfg=cfg,
+            )
 
     if "spherical" in cfg.data.projection:
         # Spherical projection

@@ -58,7 +58,9 @@ class TrainingConfig:
 
 @dataclass
 class DataConfig:
-    dataset: Literal["kitti_raw", "kitti_360", "go2w_sim", "go2w_sim_l1"] = "kitti_360"
+    dataset: Literal[
+        "kitti_raw", "kitti_360", "go2w_sim", "go2w_sim_l1", "go2w_nav_sim"
+    ] = "kitti_360"
     data_format: Literal["logscale", "inverse", "metric", "cartesian"] = "logscale"
     train_reflectance: bool = True
     projection: Literal[
@@ -71,6 +73,8 @@ class DataConfig:
         "spherical-40x500",
         # go2w_sim_l1: lower hemisphere (see r2flow/data/go2w_sim_l1)
         "spherical-64x512",
+        # go2w_nav_sim: KITTI-360 resolution over -24..+12 deg (see r2flow/data/go2w_nav_sim)
+        "spherical-64x1024",
     ] = "spherical-1024"
     resolution: Tuple[int, int] = (64, 1024)
     min_depth: float = 1.45
@@ -81,6 +85,10 @@ class DataConfig:
 class FinetuningConfig:
     init_ckpt: str | None = None
     sample_dir: str | None = None
+    # Initialise a normal (1-RF) run from pretrained weights: a checkpoint path or
+    # a release name such as "r2flow-kitti360-1rf". Unlike init_ckpt, this trains
+    # on --dataset rather than on reflow samples.
+    init_weights: str | None = None
     k_distil: int | None = None
 
 
