@@ -2,7 +2,7 @@
 
 <!-- DRAFT v0. Items in [TODO: ...] are placeholders for results/decisions we have not made yet. Nothing in a TODO should be read as a finding. -->
 
-*MAE 7560 — Optimal State Estimation. [TODO: author names]*
+Isaac Peterson and Jacob Morrey
 
 ---
 
