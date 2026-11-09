@@ -252,7 +252,7 @@ $$\tag{3}
     \frac{\partial \rho}{\partial t}
     = -\frac{\partial}{\partial x}\big(\rho\,v\big).$$
 
-Read it as: *the rate at which a spot gets more crowded equals minus the net rate at which cars leave it.* The derivative $\partial_x(\rho v)$ is the net outflow: over a tiny stretch $[x, x+\Delta x]$, cars leave at rate $\rho v(x+\Delta x)$ and arrive at rate $\rho v(x)$, and their difference per unit length tends to $\partial_x(\rho v)$.
+Read it as: the rate at which a spot gets more crowded equals minus the net rate at which cars leave it. The derivative $\partial_x(\rho v)$ is the net outflow: over a tiny stretch $[x, x+\Delta x]$, cars leave at rate $\rho v(x+\Delta x)$ and arrive at rate $\rho v(x)$, and their difference per unit length tends to $\partial_x(\rho v)$.
 
 #### Constant speed: the jam slides
 
@@ -333,7 +333,7 @@ $$p_0 = \mathcal{N}(0,I)
 
 We cannot write one down directly. We have no formula for $p_{\mathrm{data}}$, only samples of it, so we cannot write the intermediate densities $p_t$ either, and without $p_t$ there is nothing to solve for $u_t$.
 
-Moving a Gaussian onto a *single* scan, however, is easy. So we solve that small problem for every scan in the dataset and then combine the answers.
+Moving a Gaussian onto a single scan, however, is easy. So we solve that small problem for every scan in the dataset and then combine the answers.
 
 From here on we switch to the naming convention used in the flow matching literature: $x_0 \sim \mathcal{N}(0,I)$ is *noise* and $x_1 \sim p_{\mathrm{data}}$ is *data*, and time runs from noise at $t=0$ to data at $t=1$. This is the reverse of the diffusion convention above.
 
@@ -435,7 +435,7 @@ Take a one-dimensional "dataset" of two points, $x_1 = -1$ and $x_1 = +1$, each 
 
 We now have a velocity field that provably carries noise to data, assembled from easy per-scan pieces. We still cannot compute it: Eq. (12) integrates over $p_{\mathrm{data}}$ and divides by $p_t(x)$, and we have neither. The next section shows that we never need to. Training a network to predict the easy conditional velocity $x_1 - x_0$ on random pairs recovers exactly the conditional expectation in Eq. (13).
 
-## Learning the field: the flow matching objective
+### Learning the field: the flow matching objective
 
 The previous section gave us a velocity field that provably carries noise to data,
 
