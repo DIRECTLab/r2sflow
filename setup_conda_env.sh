@@ -7,6 +7,7 @@ eval "$(conda shell.bash hook)"
 conda create -n r2sflow python=3.10 -y
 conda activate r2sflow
 pip install -r requirements.txt
+pip install ipykernel nbformat nbclient nbconvert  # for notebooks/ (blog figures)
 # change line below for your CUDA version, see https://pytorch.org/
 pip3 install torch==2.13.0 torchvision==0.28.0 --index-url https://download.pytorch.org/whl/cu132
 conda install -c conda-forge sparsehash -y

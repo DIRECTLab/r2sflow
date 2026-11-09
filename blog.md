@@ -299,7 +299,7 @@ Eq. (4) predicts these trends from the slope alone. For a Gaussian, $\partial_x 
 
 -   An observer at the peak sees slope $0$, so $\partial_t\rho = 0$ for that instant. The top of the jam is flat; the road thins out only once the falling side reaches them.
 
-**[TODO: figure: jam profile at $t=0$ and $t=1$ min with the three observers marked.]**
+![A Gaussian jam of 100 cars sliding at $c=1$ km/min. The dashed curve is the jam at $t=0$. Each observer shows the density they see and whether it is rising or falling, which depends only on the slope at their position.](figs/flow_matching/traffic_jam.gif)
 
 #### The driver's view
 
@@ -367,6 +367,8 @@ $$\tag{9}
 
 This says: point at the target, and go fast enough to arrive on time. The remaining distance is $x_1 - x$ and the remaining time is $1-t$.
 
+![The conditional path for one scan $x_1$. Every noise sample drives in a straight line at constant speed. The circles are the 1σ and 2σ contours of $p_t(x\mid x_1)=\mathcal{N}(t\,x_1,(1-t)^2 I)$: the mean slides toward $x_1$ and the spread shrinks to zero.](figs/flow_matching/conditional_path.gif)
+
 We call $p_t(x\mid x_1)$ and $u_t(x\mid x_1)$ the *conditional* path and *conditional* velocity, conditional on the scan $x_1$. Since the particles really do move with this velocity, the pair satisfies the continuity equation:
 
 $$\tag{10}
@@ -404,6 +406,8 @@ $$\tag{13}
 
 A particle at $x$ asks which scans it could be heading to and how likely each one is, then moves with the posterior-weighted average of their velocities.
 
+![The marginal field for a toy dataset of eight points (stars). Arrows show $\mathbb{E}[x_1\mid x_t=x]-x$, where a particle at $x$ expects to end up. Early on every scan is about equally likely, so the field points toward the middle of the dataset. As $t\to 1$ the posterior sharpens, the field splits into one basin per scan, and every particle lands on a training point.](figs/flow_matching/marginal_field.gif)
+
 #### Proof that the averaged field works
 
 Differentiate Eq. (11) in time, substitute Eq. (10) for each scan, and pull the divergence out of the integral (it acts on $x$, not on $x_1$):
@@ -425,7 +429,7 @@ where the last step is Eq. (12) multiplied through by $p_t(x)$. The marginal pat
 
 Take a one-dimensional "dataset" of two points, $x_1 = -1$ and $x_1 = +1$, each with probability $\tfrac12$. A particle at $x = 0$ is equally likely to be heading to either one; their velocities $\frac{-1}{1-t}$ and $\frac{+1}{1-t}$ cancel, and it does not move. A particle slightly to the right of $0$ has a posterior tilted toward $+1$, so its averaged velocity points right. As $t$ grows the conditional Gaussians narrow, the posterior becomes more decisive, and the particle commits harder. Every conditional path is a straight line, yet the averaged trajectories hesitate early and then curve toward the nearer target. This curvature, born from averaging straight lines that cross, is what the reflow procedure in the [Rectified flow](#rectified-flow) section removes.
 
-**[TODO: figure: the two-point example. Left, the fan of straight conditional lines from noise to $\pm 1$. Right, trajectories of the averaged field $u_t$, showing them bend.]**
+![The two-point example. Left: straight conditional paths from random noise samples to randomly chosen targets $\pm 1$. They cross. Right: trajectories of the averaged field $u_t$ from the same starting points, over a background of $u_t(x)$ (red is upward, blue is downward). They hesitate near $x=0$, commit, and bend toward the nearer target without crossing.](figs/flow_matching/two_point.gif)
 
 #### What is still missing
 
@@ -456,6 +460,8 @@ First, it only reproduces the training set. As $t\to 1$ the conditional Gaussian
 Second, it is expensive. Each evaluation sums over the entire dataset, where every scan is a range image with tens of thousands of pixels, and it must be repeated at every integration step with the full dataset on hand.
 
 A neural network $v_\theta(t,x)$ fixes both. It compresses the field into a fixed set of weights with constant cost per step. And because it cannot reproduce the sharp switching of Eq. (14) near $t=1$, it learns a smoother field that lands *between* training scans. Those in-between points are new samples. **[TODO: optionally cite work on why diffusion and flow models generalize rather than memorize, e.g. Kadkhodaie et al., ICLR 2024; verify before citing.]**
+
+![The same eight-point dataset and the same noise samples. Left: integrating the exact field (Eq. 14) puts every sample on a training point. Right: a small network trained with the flow matching loss below cannot reproduce the sharp switching near $t=1$, so most samples land on the ring between training points.](figs/flow_matching/exact_vs_learned.gif)
 
 #### The loss we want, and why we cannot use it
 
@@ -532,6 +538,8 @@ It is minimized at $v = 0.75\cdot 1 + 0.25\cdot 3 = 1.5$ km/min, the same densit
 
 The constant $C$ is the average spread of the targets at each point. It is large when many straight-line pairs *cross* through the same $(t,x)$ heading in different directions, which is the same crossing that bends the trajectories in the two-point example. Two consequences follow. A flow matching training curve that plateaus above zero is expected, not a sign that something is broken. And reflow, by making each $x_1$ a deterministic function of its $x_0$, stops the pairs from crossing and drives $C$ toward zero, which is exactly the straightening it is designed to produce.
 
+![Training the network from the previous figure. The training loss $\mathcal{L}_{\mathrm{CFM}}$ (blue) plateaus near the floor $C$ (dashed), which we estimate from the exact field. The loss we actually care about, $\mathcal{L}_{\mathrm{FM}}$ (orange), keeps falling. On a held-out batch $\mathcal{L}_{\mathrm{CFM}} = 4.13$ and $\mathcal{L}_{\mathrm{FM}} + C = 4.12$, which checks Eq. (17).](figs/flow_matching/cfm_loss_floor.png)
+
 #### The algorithm
 
 Everything reduces to a regression on randomly paired noise and data:
@@ -564,6 +572,10 @@ In the course we sampled a Gaussian by pushing standard normal draws through a m
 If the learned trajectories were perfectly straight, one Euler step would be exact: $x_1 = x_0 + v_\theta(0,x_0)$. They are not straight, because the conditional-mean field averages over crossing paths, so the true trajectories curve. Euler's global error scales with step size times curvature, so more curvature means more steps for the same accuracy. This is the same trade the reference posts on numerical stability are about (Gundersen on conditioning, Cook on two-pass vs. one-pass variance): the same quantity computed two ways, and the cheap way costs you digits in a regime you can predict.
 
 **Reflow** is the fix. Train a first model (1-RF). Use it to generate $(x_0, x_1)$ pairs by running the ODE, where $x_1$ is now *generated* from the specific $x_0$. Retrain on those coupled pairs (2-RF). Because each $x_1$ is a deterministic function of its $x_0$, the straight-line targets no longer cross, so the new field is straighter and fewer steps suffice. Optionally distill further to 1–4 steps ($k$-TD).
+
+![Reflow on a toy problem, from a Gaussian to two moons. Both models start from the same noise. 1-RF, trained on random pairs, follows curved paths. 2-RF, retrained on 1-RF's own $(x_0, x_1)$ pairs, follows nearly straight ones. $S$ is the mean squared deviation of the velocity from the straight-line displacement.](figs/flow_matching/reflow.gif)
+
+![Samples from 1-RF and 2-RF with 1, 2, 4 and 100 Euler steps. With one step, 1-RF collapses to the mean of the data. 2-RF already matches its 100-step result.](figs/flow_matching/reflow.png)
 
 # LiDAR as an image
 
