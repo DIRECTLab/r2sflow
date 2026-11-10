@@ -77,11 +77,9 @@ Diffusion models use two processes:
 
 2.  a *reverse process*, $p_\theta$, which reverses the forward process and takes a sample of Gaussian noise and moves it onto the data manifold.
 
-![The forward process moves a data sample, $x_0$, off the manifold and the reverse process returns the noised data sample back to the manifold.](figs/diffusion_manifold.png)
+![The forward process moves a data sample $x_0$ off the manifold, and the reverse process walks a noise sample back onto it. Every panel is the bird's eye view of the point cloud decoded from $x_t$. The left leg is the forward noising of one real Go2-W scan; the right leg is the exact reverse posterior chain $q(x_{t-1}\mid x_t,x_0)$ aimed at a *different* real scan, which is the trajectory the learned $p_\theta$ has to imitate without ever being shown its target. Coming back down somewhere else on the manifold is what makes this a generative model.](figs/diffusion/diffusion_manifold.png)
 
-**[TODO: Create this figure but with lidar visualizations in rviz and labels for the forward and reverse process instead of the interpolation.]**
-
-#### Forward Process
+### Forward Process
 
 Start with a data sample $x_0 \sim p_{\mathrm{data}}$, where $x_0$ is a real range image gathered from our LiDAR sensor. We want to gradually transform $x_0$ into a sample from a simple distribution, ideally a standard Gaussian $\mathcal{N}(0,I)$.
 
@@ -138,6 +136,8 @@ $$q(x_t\mid x_{t-1})
         \sqrt{1-\beta_t}\,x_{t-1},
         \beta_t I
     \right).$$
+
+![Pure Brownian motion (a) keeps spreading, so its variance grows without bound (c, grey) and it never settles on $\mathcal{N}(0,I)$. Shrinking $x_{t-1}$ by $\sqrt{1-\beta_t}$ before adding $\sqrt{\beta_t}\,\epsilon_t$ (b) pulls the mass back in as fast as the noise spreads it out, so the variance converges to $1$ (c, red). Both start from the same three-mode stand-in for $p_{\mathrm{data}}$.](figs/diffusion/brownian_vs_vp.png)
 
 To understand how these small steps accumulate, consider again the forward process in Eq. (1) above. Define
 
@@ -198,6 +198,8 @@ $$q(x_t\mid x_0)
 
 This gives us a closed-form expression for sampling from any step of the forward process without computing all the preceding steps.
 
+![The linear schedule of Ho et al. (2020) with $T=1000$. Every individual $\beta_t$ is small (a), but $\bar\alpha_t$ compounds a thousand of them, so the signal coefficient $\sqrt{\bar\alpha_t}$ has collapsed and the noise coefficient $\sqrt{1-\bar\alpha_t}$ has saturated well before $t=T$ (b). The signal-to-noise ratio crosses $1$ at $t\approx 259$ (c). The dots in (b) mark the timesteps shown in the next figure.](figs/diffusion/noise_schedule.png)
+
 Finally, if we choose a noise schedule such that $\bar{\alpha}_T \approx 0$, the contribution of the original sample vanishes while the noise covariance approaches $I$:
 
 $$x_T \approx \epsilon,
@@ -205,7 +207,442 @@ $$x_T \approx \epsilon,
 
 Thus, the marginal distribution $q(x_T)$ approaches a standard Gaussian, completing our forward diffusion process.
 
-#### Reverse Process
+![Eq. (2) applied to a real scan: one Go2-W simulator sweep projected onto the sensor's $40\times512$ ray grid and encoded as log-scale depth in $[-1,1]$, which is what the models actually train on. Top: the range image $x_t$, with a single draw of $\epsilon$ held fixed across $t$ so the rows are comparable. Bottom: the same $x_t$ decoded back to a point cloud. The room is still legible at $t=25$ and survives faintly to $t=75$, long after the per-step noise looks destructive.](figs/diffusion/forward_lidar.png)
+
+### Reverse Process
+
+Remember, our ultimate goal is to learn to sample from our original data distribution, real LiDAR range images. It is very easy to sample from Gaussian noise and now that we have a process for transforming our complex data distribution into Gaussian noise, we just need to reverse the process. Starting with a sample $x_T \sim \mathcal{N}(0,I)$, our goal is to progressively walk back onto the data manifold until we obtain a new range image $x_0 \sim p_{\mathrm{data}}$.
+
+However, reversing the forward process is not as simple as subtracting the noise we added. Recall that each forward step introduces a new random variable $\epsilon_t$. Given only a noisy sample $x_t$, we do not know which noise was added or exactly what the previous sample $x_{t-1}$ looked like.
+
+Instead, we want to model the probability distribution of possible previous states, given the current noisy state:
+
+$$
+q(x_{t-1}\mid x_t).
+$$
+
+This is the true reverse conditional distribution induced by our forward process and the data distribution. Using Bayes' rule, we can express it as
+
+$$
+q(x_{t-1}\mid x_t)
+=
+\frac{
+    q(x_t\mid x_{t-1})q(x_{t-1})
+}{
+    q(x_t)
+}.
+$$
+
+Although we know the forward transition $q(x_t\mid x_{t-1})$, the marginal distributions $q(x_{t-1})$ and $q(x_t)$ are not directly available. To see why, recall that we can calculate the probability of a noisy image $x_t$ given an original image $x_0$:
+
+$$
+q(x_t\mid x_0)
+=
+\mathcal N\left(
+x_t;\sqrt{\bar\alpha_t}x_0,
+(1-\bar\alpha_t)I
+\right).
+$$
+
+However, to calculate the marginal probability $q(x_t)$, we must consider every possible original image that could have produced $x_t$. This requires integrating over the data distribution:
+
+$$
+q(x_t)
+=
+\int q(x_t\mid x_0)p_{\mathrm{data}}(x_0)\,dx_0.
+$$
+
+Substituting our known forward conditional gives
+
+$$
+q(x_t)
+=
+\int
+\mathcal N\left(
+x_t;\sqrt{\bar\alpha_t}x_0,
+(1-\bar\alpha_t)I
+\right)
+p_{\mathrm{data}}(x_0)\,dx_0.
+$$
+
+The difficulty is now apparent: although we know the Gaussian conditional distribution, we do not know $p_{\mathrm{data}}(x_0)$, and evaluating this integral over the high-dimensional space of possible range images is generally intractable. The same problem applies to $q(x_{t-1})$.
+
+![What is and is not available to us, drawn at $t=300$. We only ever see samples from $p_{\mathrm{data}}$, never the density itself (a). Conditioned on one sample, $q(x_t\mid x_0)$ is a single Gaussian we can write down (b). The marginal $q(x_t)$ that Bayes' rule asks for is the average of one such Gaussian per $x_0$ (c, grey). For this toy mixture that average is a sum over three modes; for range images it is an integral over $\mathbb{R}^{40\times512}$ against a density we do not have.](figs/diffusion/intractable_marginal.png)
+
+Therefore, even though the forward noising process is completely specified, we generally cannot calculate its exact reverse conditional $q(x_{t-1}\mid x_t)$ using Bayes' rule.
+
+This brings us back to our original problem: we need a way to learn the structure of the data distribution without explicitly calculating its probability density.
+
+Diffusion models solve this by introducing a learned reverse process $p_\theta$, parameterized by a neural network, to approximate the true reverse transitions:
+
+$$
+p_\theta(x_{t-1}\mid x_t)
+\approx
+q(x_{t-1}\mid x_t).
+$$
+
+In the standard DDPM formulation, each learned reverse transition is modeled as a Gaussian:
+
+$$
+p_\theta(x_{t-1}\mid x_t)
+=
+\mathcal{N}\left(
+    x_{t-1};
+    \mu_\theta(x_t,t),
+    \Sigma_\theta(x_t,t)
+\right).
+$$
+
+Here, $\mu_\theta$ and $\Sigma_\theta$ describe the mean and covariance of the learned reverse transition.
+
+<details>
+<summary><strong>Why is the reverse transition assumed to be Gaussian?</strong></summary>
+
+Although the forward transition $q(x_t\mid x_{t-1})$ is Gaussian by construction, the true reverse conditional $q(x_{t-1}\mid x_t)$ is not necessarily Gaussian.
+
+Recall that, by Bayes' rule,
+
+$$
+q(x_{t-1}\mid x_t)
+=
+\frac{
+q(x_t\mid x_{t-1})q(x_{t-1})
+}{
+q(x_t)
+}.
+$$
+
+Since $q(x_t)$ is constant with respect to $x_{t-1}$, we can write
+
+$$
+q(x_{t-1}\mid x_t)
+\propto
+q(x_t\mid x_{t-1})q(x_{t-1}).
+$$
+
+This means the shape of the reverse conditional is determined by the product of the Gaussian forward likelihood and the marginal distribution $q(x_{t-1})$, which may be highly irregular or multimodal.
+
+![Why small forward noise makes the reverse transition approximately Gaussian](figs/diffusion/bayes_noise_explainer.png)
+
+As illustrated above, if $\beta_t$ is large, the forward likelihood has a large variance and may overlap multiple modes of $q(x_{t-1})$. Their product can therefore remain multimodal, meaning a single Gaussian would be a poor approximation of the reverse conditional.
+
+However, when $\beta_t$ is small, the Gaussian forward likelihood becomes sharply concentrated around $x_{t-1}=x_t/\sqrt{\alpha_t}$. If the marginal distribution $q(x_{t-1})$ is sufficiently smooth in this small neighborhood, its log-density can be approximated by a first-order Taylor expansion.
+
+Multiplying the narrow Gaussian likelihood by this locally approximated density produces another Gaussian, with a mean shifted toward regions of higher probability density.
+
+Therefore, for sufficiently small diffusion steps and under suitable smoothness assumptions, the true reverse transition is approximately Gaussian:
+
+$$
+q(x_{t-1}\mid x_t)
+\approx
+\mathcal N\left(
+x_{t-1};
+\mu_t(x_t),
+\Sigma_t(x_t)
+\right).
+$$
+
+This motivates modeling each learned reverse transition with a Gaussian whose parameters are predicted by a neural network:
+
+$$
+p_\theta(x_{t-1}\mid x_t)
+=
+\mathcal N\left(
+x_{t-1};
+\mu_\theta(x_t,t),
+\Sigma_\theta(x_t,t)
+\right).
+$$
+
+By choosing a noise schedule with sufficiently small steps, we can approximate the complicated reverse transformation as a sequence of much simpler, approximately Gaussian transitions.
+
+</details>
+
+Once trained, we can generate a new LiDAR range image by sampling from a standard Gaussian and repeatedly applying these learned reverse transitions:
+
+$$
+x_T \sim \mathcal{N}(0,I),
+\qquad
+x_{t-1}\sim p_\theta(x_{t-1}\mid x_t).
+$$
+
+After $T$ reverse steps, we obtain a new sample $x_0$ whose distribution should approximate $p_{\mathrm{data}}$.
+
+#### Training the Network
+
+We now have a model for the reverse process, but how do we train it? We want our neural network to predict the parameters of the Gaussian reverse transition,
+
+$$
+p_\theta(x_{t-1}\mid x_t)
+=
+\mathcal{N}\left(
+x_{t-1};
+\mu_\theta(x_t,t),
+\Sigma_\theta(x_t,t)
+\right),
+$$
+
+such that the learned reverse transition approximates the true reverse conditional $q(x_{t-1}\mid x_t)$.
+
+However, we just established that this true reverse conditional is generally intractable because it depends on the unknown data distribution. How can we train a network to approximate a distribution that we cannot evaluate?
+
+The key observation is that **during training, we know the original range image $x_0$** because it comes directly from our dataset. Although $q(x_{t-1}\mid x_t)$ is intractable, the conditional distribution $q(x_{t-1}\mid x_t,x_0)$ can be calculated analytically.
+
+##### Deriving the Reverse Posterior
+
+Using Bayes' rule, and the fact that the forward process is Markovian, we have
+
+$$
+q(x_{t-1}\mid x_t,x_0)
+=
+\frac{
+q(x_t\mid x_{t-1})q(x_{t-1}\mid x_0)
+}{
+q(x_t\mid x_0)
+}.
+$$
+
+Recall that we already know all three distributions on the right-hand side:
+
+$$
+q(x_t\mid x_{t-1})
+=
+\mathcal{N}\left(
+x_t;\sqrt{\alpha_t}x_{t-1},\beta_t I
+\right),
+$$
+
+$$
+q(x_{t-1}\mid x_0)
+=
+\mathcal{N}\left(
+x_{t-1};
+\sqrt{\bar\alpha_{t-1}}x_0,
+(1-\bar\alpha_{t-1})I
+\right),
+$$
+
+$$
+q(x_t\mid x_0)
+=
+\mathcal{N}\left(
+x_t;
+\sqrt{\bar\alpha_t}x_0,
+(1-\bar\alpha_t)I
+\right).
+$$
+
+Because these distributions are Gaussian, their product, after normalization, is also Gaussian. Therefore, the reverse posterior conditioned on $x_0$ has the form
+
+$$
+q(x_{t-1}\mid x_t,x_0)
+=
+\mathcal{N}\left(
+x_{t-1};
+\tilde\mu_t(x_t,x_0),
+\tilde\beta_t I
+\right),
+$$
+
+where
+
+$$
+\tilde\mu_t(x_t,x_0)
+=
+\frac{\sqrt{\bar\alpha_{t-1}}\beta_t}
+{1-\bar\alpha_t}x_0
++
+\frac{\sqrt{\alpha_t}(1-\bar\alpha_{t-1})}
+{1-\bar\alpha_t}x_t
+$$
+
+and
+
+$$
+\tilde\beta_t
+=
+\frac{1-\bar\alpha_{t-1}}
+{1-\bar\alpha_t}\beta_t.
+$$
+
+Unlike the true reverse conditional $q(x_{t-1}\mid x_t)$, this posterior is completely known whenever we have the original training image $x_0$.
+
+![The reverse posterior, read off its two parameters. (a) $\tilde\mu_t$ is an affine blend of $x_t$ and $x_0$, and the weight on $x_0$ is only $1.91\%$ at $t=100$ and $0.03\%$ at $t=900$: away from the last few steps, a reverse step is almost entirely “stay where you are”. (b) Knowing $x_0$ makes the step narrower than the forward step it undoes, but only noticeably so near $t=0$, where $\tilde\beta_1=0$ and $x_0$ fixes the answer outright.](figs/diffusion/posterior_weights.png)
+
+This gives us a way to construct a training target for the reverse process.
+
+![Sampling $x_{t-1}\sim q(x_{t-1}\mid x_t,x_0)$ for all $T$ steps, starting from pure Gaussian noise and consulting the true $x_0$ at every step. It lands on $x_0$ exactly. Almost nothing happens for the first few hundred steps (b), because the weight on $x_0$ is still a fraction of a percent. This chain is the target the network has to reproduce without ever being shown $x_0$.](figs/diffusion/posterior_chain_lidar.png)
+
+##### Learning the Reverse Transition
+
+Ideally, we want the learned reverse transition $p_\theta(x_{t-1}\mid x_t)$ to match the true reverse posterior as closely as possible.
+
+One way to measure the difference between two probability distributions is the Kullback–Leibler (KL) divergence. For a given training sample $x_0$ and timestep $t$, we can define the objective
+
+$$
+\mathcal{L}_t
+=
+D_{\mathrm{KL}}\left(
+q(x_{t-1}\mid x_t,x_0)
+\;\|\;
+p_\theta(x_{t-1}\mid x_t)
+\right).
+$$
+
+The KL divergence measures how much the learned reverse distribution differs from the known posterior. Minimizing it encourages the network to predict reverse transitions consistent with the forward diffusion process.
+
+In the original DDPM formulation, these KL terms arise from a variational lower bound on the data likelihood. For simplicity, we will focus on how they lead to the practical training objective.
+
+For Gaussian distributions with fixed covariance, minimizing the KL divergence with respect to the predicted mean is equivalent, up to a timestep-dependent weighting, to minimizing the squared error between their means:
+
+$$
+\mathcal{L}_t
+\propto
+\left\|
+\tilde\mu_t(x_t,x_0)
+-
+\mu_\theta(x_t,t)
+\right\|^2.
+$$
+
+So we could train a neural network to predict the mean of the reverse Gaussian directly. However, DDPMs use a particularly useful alternative: instead of predicting the reverse mean, the network predicts the Gaussian noise that was added to the original image.
+
+##### Predicting Noise Instead of the Reverse Mean
+
+Recall our closed-form forward process:
+
+$$
+x_t
+=
+\sqrt{\bar\alpha_t}x_0
++
+\sqrt{1-\bar\alpha_t}\epsilon,
+\qquad
+\epsilon\sim\mathcal{N}(0,I).
+$$
+
+Since we know $x_0$, $x_t$, and the noise schedule, we can express the original image as
+
+$$
+x_0
+=
+\frac{
+x_t-\sqrt{1-\bar\alpha_t}\epsilon
+}{
+\sqrt{\bar\alpha_t}
+}.
+$$
+
+Substituting this expression into the posterior mean $\tilde\mu_t(x_t,x_0)$ and simplifying gives
+
+$$
+\tilde\mu_t(x_t,\epsilon)
+=
+\frac{1}{\sqrt{\alpha_t}}
+\left(
+x_t-
+\frac{\beta_t}{\sqrt{1-\bar\alpha_t}}\epsilon
+\right).
+$$
+
+Notice that the posterior mean can be calculated entirely from the noisy image $x_t$, the timestep $t$, and the noise $\epsilon$ that was added.
+
+This motivates parameterizing the learned reverse mean using a neural network $\epsilon_\theta(x_t,t)$ that predicts the added noise:
+
+$$
+\boxed{
+\mu_\theta(x_t,t)
+=
+\frac{1}{\sqrt{\alpha_t}}
+\left(
+x_t-
+\frac{\beta_t}{\sqrt{1-\bar\alpha_t}}
+\epsilon_\theta(x_t,t)
+\right)
+}
+$$
+
+Rather than directly predicting a less-noisy range image, the network learns to estimate the noise present in the current image. We can then use that prediction to calculate the mean of the reverse transition.
+
+Since we generate the noisy training images ourselves, we know exactly which noise $\epsilon$ was added. This gives us a straightforward supervised learning objective:
+
+$$
+\boxed{
+\mathcal{L}_{\mathrm{simple}}(\theta)
+=
+\mathbb{E}_{\substack{
+x_0\sim p_{\mathrm{data}}\\
+t\sim\mathcal{U}\{1,\ldots,T\}\\
+\epsilon\sim\mathcal{N}(0,I)
+}}
+\left[
+\left\|
+\epsilon-
+\epsilon_\theta\left(
+\sqrt{\bar\alpha_t}x_0+
+\sqrt{1-\bar\alpha_t}\epsilon,
+t
+\right)
+\right\|^2
+\right]
+}
+$$
+
+This is the simplified noise-prediction objective used in the original DDPM paper (Ho et al., 2020). It drops the timestep-dependent weighting that appears in the likelihood-based objective, but works well in practice.
+
+##### Putting It All Together
+
+Training a diffusion model now becomes a relatively straightforward procedure:
+
+1. Sample a real LiDAR range image $x_0$ from the training dataset.
+2. Sample a random timestep $t$ between $1$ and $T$.
+3. Sample Gaussian noise $\epsilon\sim\mathcal{N}(0,I)$.
+4. Construct the noisy image directly using $x_t=\sqrt{\bar\alpha_t}x_0+\sqrt{1-\bar\alpha_t}\epsilon$.
+5. Pass $x_t$ and $t$ to the neural network to predict $\epsilon_\theta(x_t,t)$.
+6. Update the network parameters by minimizing the squared error between the predicted and actual noise.
+
+By repeating this process across many range images and noise levels, the network learns to estimate the noise present at every stage of the diffusion process.
+
+Once trained, we can start with pure Gaussian noise $x_T\sim\mathcal{N}(0,I)$ and use the network's predictions to progressively construct less-noisy samples:
+
+$$
+x_{t-1}
+=
+\frac{1}{\sqrt{\alpha_t}}
+\left(
+x_t-
+\frac{\beta_t}{\sqrt{1-\bar\alpha_t}}
+\epsilon_\theta(x_t,t)
+\right)
++
+\sigma_t z,
+$$
+
+where $z\sim\mathcal{N}(0,I)$ for $t>1$, and $z=0$ for the final step. The variance $\sigma_t^2$ is specified by the reverse sampling schedule.
+
+After repeating this process from $T$ down to $1$, we obtain a newly generated LiDAR range image.
+
+![The trained reverse process on a 2D toy (a Gaussian to two moons, the same toy the rectified flow figures use later on). Left: the sample $x_t$. Right: the clean sample the network's noise prediction implies, $\hat x_0=(x_t-\sqrt{1-\bar\alpha_t}\,\epsilon_\theta)/\sqrt{\bar\alpha_t}$. Early on that guess is the blurred average of the whole dataset; it only separates into two moons over the last couple of hundred steps.](figs/diffusion/reverse_chain_2d.gif)
+
+The important insight is that **we never needed to explicitly evaluate the probability density of real LiDAR observations**. Instead, we trained a network to predict noise added to real samples, and used those predictions to construct a generative process that transforms Gaussian noise into realistic range images.
+
+#### Where Diffusion Falls Short
+
+Diffusion models provide an elegant solution to our original problem: we can generate samples from a complex, unknown data distribution without ever explicitly evaluating its probability density. However, this approach comes with some limitations.
+
+The first is **computational cost during generation**. Although training allows us to sample any noise level directly using the closed-form forward process, generation requires repeatedly evaluating the neural network to move from noise back toward the data distribution. In the original DDPM formulation, this can require hundreds or thousands of sequential denoising steps. For high-dimensional data such as LiDAR range images, these repeated evaluations can make generation expensive.
+
+![The same trained model, sampled with an evenly strided schedule. Quality is the energy distance to a real batch of the same size, averaged over five batches of 3000 samples; the band is what two real batches score against each other. Below roughly 30 steps the samples visibly fall apart, and past about 60 steps more steps buy nothing measurable — but every step is another forward pass through the network, for every sample.](figs/diffusion/sampling_cost.png)
+
+The second limitation is that **we learn the transformation indirectly**. Recall that our original goal was to find a transformation that takes samples from a simple Gaussian distribution and moves them into the structured region occupied by real LiDAR observations. However, rather than learning this transformation directly, diffusion models construct a stochastic process that destroys the data, then train a network to predict the noise introduced by that process. We use these noise predictions to reconstruct the reverse transitions that ultimately generate new samples.
+
+This raises an interesting question: **what if we could learn how to move samples from the Gaussian distribution to the data distribution directly, without first defining a stochastic noising process and learning to reverse it?**
+
+Instead of repeatedly removing random noise, imagine assigning a velocity to every point in our high-dimensional space. A sample beginning in the Gaussian distribution could then follow this velocity field along a continuous trajectory toward the data distribution.
+
+This is the central idea behind **flow matching**. Rather than training a network to predict noise, we train it to predict a velocity field that transports one probability distribution into another.
+
+As we will see, this gives us a more direct way to formulate the generative problem, and it also opens the door to designing transport paths that can be integrated efficiently during generation.
 
 ## Flow matching
 
