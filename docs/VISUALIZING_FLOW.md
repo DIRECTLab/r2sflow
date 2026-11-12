@@ -42,7 +42,7 @@ exactly once:
 |`tools/lidar_grid.py`|numpy|`RayGrid` + spherical projection + scan I/O. Pure geometry, importable from either environment.|
 |`tools/bag_io.py`|rosbags|PointCloud2 decoding and message iteration, ROS 1 and ROS 2.|
 |`tools/rosbag_to_r2flow.py`|rosbags|Sim (Livox) converter — ring-indexed, tf de-skewed.|
-|`tools/rosbag2_go2_to_r2flow.py`|rosbags|Real (utlidar L1) converter — sweep accumulation, origin check.|
+|`tools/rosbag2_go2_to_r2flow.py`|rosbags|Real (utlidar, Unitree L2) converter — sweep accumulation, origin check.|
 |`r2flow/utils/flow.py`|torch|`euler_trajectory`, plus `encode`/`split_channels` mirroring train.py.|
 |`tools/visualize_flow.py`|torch, matplotlib|CLI: scans -> trajectory -> figure.|
 
@@ -53,7 +53,8 @@ a drift shows up as an error rather than silently wrong images.
 
 ## Converting a real ROS 2 bag
 
-The Go2's `utlidar` L1 is a spinning non-repetitive scanner. One PointCloud2
+The Go2's `utlidar` is a Unitree **L2** (measured ~62.7k points/s, ~4.1k points
+per 65 ms message, 15.4 Hz; an L1 outputs ~21.6k/s), a spinning non-repetitive scanner. One PointCloud2
 message is a ~65 ms slice of a continuous spiral, not a sweep, and its `ring`
 field is a constant, so there is no row structure to exploit — the converter
 accumulates several messages and projects onto the model's ray grid.
@@ -134,7 +135,7 @@ tensor handed to the model is untouched.
 
 - **The real bag is far out of distribution.** The checkpoint was trained on
   simulated Livox scans: 40 uniform rings, −28.2°..+29.5°, ranges to 70 m. The
-  real L1 sweeps +0.5°..+89.8° with a median range of 0.42 m and 93% of returns
+  real L2 sweeps +0.5°..+89.8° with a median range of 0.42 m and 93% of returns
   inside 1.45 m, most of them the robot's own body. Only about 25% of real
   points land in the model's elevation band *and* range window, which is why the
   input fill is ~18% against ~90% for sim. Treat the outputs as a domain-gap
@@ -142,7 +143,7 @@ tensor handed to the model is untouched.
 - **Real sweeps are smeared.** No `/tf`, so the 0.45 s accumulation window is
   uncompensated. The sim converter de-skews; this one cannot.
 - **Reflectance scales are unrelated.** Sim intensity is 0–85 (divided by 100),
-  real L1 is 0–255 (divided by 255). Neither is calibrated against the other.
+  real L2 is 0–255 (divided by 255). Neither is calibrated against the other.
 - **Euler, not `dopri5`.** `sample.py` uses an adaptive solver; this uses fixed
   Euler steps so the intermediate states are evenly spaced and meaningful. With
   few steps the endpoint will differ from what `sample.py` produces.

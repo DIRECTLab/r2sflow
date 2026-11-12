@@ -166,4 +166,5 @@ cache_*.pkl
 .ruff_cache/
 
 .vscode/
-simulated_bags
+**/rosbags/*
+!**/rosbags/.gitkeep

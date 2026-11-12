@@ -13,7 +13,8 @@ opposed to the back-mounted Livox that `go2w_sim` uses.
 
 Its `ring` field is a scan-order index rather than an elevation row, so there is
 no ring table to exploit and the projection is purely spherical. Only the lower
-hemisphere is kept, because the real L1 reports nothing above the horizon.
+hemisphere is kept, because the real utlidar (an L2) reports nothing above the
+horizon.
 """
 
 # Ray grid, read back from the dataset and asserted below so a converter change

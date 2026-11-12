@@ -1054,7 +1054,7 @@ Our lab's question is not "can we generate KITTI scans" but "can we use a genera
 
 -   Simulated navigation episodes: $64\times1024$ over $-24^\circ$ to $+12^\circ$, chosen so the pretrained KITTI-360 weights load unchanged.
 
--   Real Go2 `utlidar` L1 bags, accumulated over several messages because one message is a $\sim$<!-- -->65 ms slice of a non-repetitive spiral.
+-   Real Go2 `utlidar` bags (a Unitree L2), accumulated over several messages because one message is a $\sim$<!-- -->65 ms slice of a non-repetitive spiral.
 
 #### Fine-tuning
 

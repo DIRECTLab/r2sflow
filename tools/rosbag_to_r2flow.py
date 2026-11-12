@@ -191,7 +191,7 @@ def grid_indices(
 # pitch -6.2 deg), the counterpart of the real robot's utlidar. Its `ring` field
 # is a scan-order index, not an elevation row, so there is no ring table to use
 # and the projection is purely spherical. It sweeps a full 360 deg vertical
-# circle, but only the lower hemisphere is kept: the real L1 reports nothing
+# circle, but only the lower hemisphere is kept: the real utlidar (an L2) reports nothing
 # above the horizon, so the upper half would be sim-only signal the model could
 # never match. min_depth 0.1 keeps the dense ground returns directly beneath the
 # robot while cutting most chassis self-hits; max_depth is the sim's own clamp.

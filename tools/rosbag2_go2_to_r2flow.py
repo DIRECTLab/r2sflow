@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Convert a real Unitree Go2 (utlidar L1) ROS 2 bag into R2Flow range images.
+"""Convert a real Unitree Go2 (utlidar, a Unitree L2) ROS 2 bag into R2Flow range images.
 
-The L1 is a spinning non-repetitive scanner: one PointCloud2 message is a ~65 ms
+The L2 is a spinning non-repetitive scanner: one PointCloud2 message is a ~65 ms
 slice of a continuous spiral, not a full sweep, and its `ring` field is a
 constant so there is no row structure to exploit. This tool accumulates several
 consecutive messages into one sweep and projects them onto the same ray grid the
@@ -161,7 +161,7 @@ def convert(args) -> None:
         out_dir,
         frames,
         {
-            "source": "unitree go2 (utlidar L1) ros2 bag",
+            "source": "unitree go2 (utlidar L2) ros2 bag",
             "bag": str(args.bag),
             "topic": args.topic,
             "num_rings": grid.height,
@@ -199,7 +199,7 @@ def main(argv=None) -> None:
     p.add_argument("--messages-per-scan", type=int, default=8,
                    help="consecutive messages merged into one sweep (default: 8)")
     p.add_argument("--limit", type=int, default=None, help="stop after N sweeps")
-    # Defaults describe the L1 grid (lower hemisphere), matching
+    # Defaults describe the sim `l1` grid (lower hemisphere), matching
     # `rosbag_to_r2flow.py --sensor l1` and r2flow/data/go2w_sim_l1. The
     # elevation band must be given explicitly alongside height/width -- setting
     # only --height silently resamples whatever band is in force.
@@ -219,7 +219,7 @@ def main(argv=None) -> None:
     # The utlidar frame is z-down: every return has positive z and the dense
     # plane at z=0.347 is the floor under a sensor ~0.35 m up. The sim is z-up,
     # so flip to put both in the same convention (real data then lands in the
-    # lower hemisphere, which is what the L1 grid covers).
+    # lower hemisphere, which is what the `l1` grid covers).
     p.add_argument("--flip-z", action="store_true", default=True,
                    help="negate z to convert the z-down utlidar frame (default: on)")
     p.add_argument("--no-flip-z", dest="flip_z", action="store_false",
