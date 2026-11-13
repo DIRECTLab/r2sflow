@@ -167,4 +167,4 @@ cache_*.pkl
 
 .vscode/
 **/rosbags/*
-!**/rosbags/.gitkeep
+!**/rosbags/.gitkeep_site/
