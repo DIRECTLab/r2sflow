@@ -139,21 +139,26 @@ you land to the real robot:
 
 The real robot's `utlidar` is front-mounted and faces down, so `l1` is its
 counterpart; `livox` is a different sensor in a different place and its range
-statistics are nothing like the real one's. Projected onto the same grid:
+statistics are nothing like the real one's. Note that the match is in mount
+position, not sensor model: the sim `l1` emulates a Unitree L1, while the real
+`utlidar` in `go2_mocam_loop` is an **L2** (measured from `/go2/raw_lidar`:
+~62.7k points/s in ~4.1k-point, 65 ms messages at 15.4 Hz, against ~21.6k/s for
+an L1). Projected onto the same grid:
 
 |domain|pixel fill|depth p10|depth p50|depth p90|
 |:-|:-|:-|:-|:-|
 |sim `l1`|0.809|0.25 m|**0.34 m**|1.58 m|
-|real L1|0.377|0.34 m|**0.44 m**|1.48 m|
+|real L2|0.377|0.34 m|**0.44 m**|1.48 m|
 |sim `livox`|0.281|1.07 m|*1.92 m*|6.05 m|
 
 Two things differ from the Livox path. The L1's `ring` field is a **scan-order
 index, not an elevation row** (ring 0→80→160 maps to elevation −0°→51°→78°), so
 there is no ring table and the projection is purely spherical. And it sweeps a
 full 360° vertical circle, but only the **lower hemisphere** is kept — the real
-L1 reports nothing above the horizon, so the upper half would be sim-only signal.
+utlidar (an L2) reports nothing above the horizon, so the upper half would be
+sim-only signal.
 
-`min_depth` is 0.1 m rather than 0.5: about 64% of L1 returns fall inside 0.5 m,
+`min_depth` is 0.1 m rather than 0.5: about 64% of sim `l1` returns fall inside 0.5 m,
 and while many are the chassis, many more are ground directly beneath the robot
 where ray density is highest. 0.1 m cuts most self-hits and keeps the ground.
 

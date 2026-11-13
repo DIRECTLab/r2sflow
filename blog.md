@@ -1,16 +1,16 @@
 ---
-author:
-- Isaac Peterson and Jacob Morrey
-title: "From Noise to Point Clouds: Flow Matching for LiDAR"
+Authors:
+ Isaac Peterson and Jacob Morrey
+Title: "From Noise to Point Clouds: Flow Matching for LiDAR"
 ---
 
 # Why a state estimator cares about generating LiDAR
 
-A Kalman filter needs a measurement model: given the state, what does the sensor report? For a spinning LiDAR in a real building that model is hopeless to write down. Returns depend on materials, incidence angle, clutter, and the robot's own body. What we *can* do is collect scans and learn the distribution of what a scan looks like.
+A Kalman filter needs a measurement model: given the state, what does the sensor report? For a spinning LiDAR in a real building that model is hopeless to write down. Returns depend on materials, incidence angle, clutter, and the robot's own body. What we can do is collect scans and learn the distribution of what a scan looks like.
 
-That is a generative model: a way to draw samples from $p(\text{scan})$. Once you have one, you can (a) fill in simulated data that looks real, (b) check whether a real scan is in-distribution, and (c) use it as a prior in a Bayesian update, which is the structure of everything we did in Parts 8 and 9 of the course.
+That is a generative model: a way to draw samples from $p(\text{scan})$. Once you have one, you can (a) fill in simulated data that looks real, (b) check whether a real scan is in-distribution, and (c) use it as a prior in a Bayesian update.
 
-This post is about one family of generative models, **diffusion** and **flow matching**, and one application of it, **LiDAR range images**. We cover the math, then the specific model our lab uses (R2Flow), then what happened when we pointed it at a Unitree Go2-W robot, simulated and real.
+This post is about one family of generative models, diffusion and flow matching, and one application of it, LiDAR range images. We cover the math, then the specific model our lab uses, R2Flow ([Nakashima, 2025](https://arxiv.org/abs/2412.02241)), then what happened when we pointed it at a Unitree Go2 robot with LiDAR in simulation.
 
 # Building the Theory
 
@@ -28,7 +28,7 @@ In other words, we want to generate new range images that are statistically indi
 
 One way to understand this problem is to consider the geometry of the data distribution. Although a LiDAR range image may contain thousands of values, those values are not independent. They are constrained by the geometry of the environment, the position and orientation of the sensor, and the physical characteristics of the measurement process.
 
-Consequently, realistic range images occupy only a small, highly structured region of the space of all possible range images. We can think of this region as a *data manifold*, $\mathcal{M} \subseteq \mathbb{R}^d$, on or near which real observations are concentrated. (This is a common assumption in machine learning called the *manifold hypothesis*, go [here](https://www.youtube.com/watch?v=d-FJfOQsqLI) for a good explainer.)
+Consequently, realistic range images occupy only a small, highly structured region of the space of all possible range images. We can think of this region as a data manifold, $\mathcal{M} \subseteq \mathbb{R}^d$, on or near which real observations are concentrated. This is a common assumption in machine learning called the manifold hypothesis, a statistical exploration can be found in [Whiteley, 2026](https://arxiv.org/abs/2208.11665).
 
 From this perspective, generating a realistic range image amounts to producing a point on or near this manifold. An arbitrary point in the ambient space is unlikely to represent a physically plausible observation, but a point in the region occupied by real data is much more likely to exhibit the structure we want.
 
@@ -73,11 +73,11 @@ Recall that our goal is to learn a transformation from a simple prior distributi
 
 Diffusion models use two processes:
 
-1.  a *forward process*, denoted by $q$, which takes a real sample of a lidar range image and moves it off of the data manifold and onto a chosen simple distribution, in this case a Gaussian.
+1.  a forward process, denoted by $q$, which takes a real sample of a lidar range image and moves it off of the data manifold and onto a chosen simple distribution, in this case a Gaussian.
 
-2.  a *reverse process*, $p_\theta$, which reverses the forward process and takes a sample of Gaussian noise and moves it onto the data manifold.
+2.  a reverse process, $p_\theta$, which reverses the forward process and takes a sample of Gaussian noise and moves it onto the data manifold.
 
-![The forward process moves a data sample $x_0$ off the manifold, and the reverse process walks a noise sample back onto it. Every panel is the bird's eye view of the point cloud decoded from $x_t$. The left leg is the forward noising of one real Go2-W scan; the right leg is the exact reverse posterior chain $q(x_{t-1}\mid x_t,x_0)$ aimed at a *different* real scan, which is the trajectory the learned $p_\theta$ has to imitate without ever being shown its target. Coming back down somewhere else on the manifold is what makes this a generative model.](figs/diffusion/diffusion_manifold.png)
+![The forward process moves a data sample $x_0$ off the manifold, and the reverse process walks a noise sample back onto it. Every panel is the bird's eye view of the point cloud decoded from $x_t$. The left leg is the forward noising of one real Go2-W scan; the right leg is the exact reverse posterior chain $q(x_{t-1}\mid x_t,x_0)$ aimed at a different real scan, which is the trajectory the learned $p_\theta$ has to imitate without ever being shown its target. Coming back down somewhere else on the manifold is what makes this a generative model.](figs/diffusion/diffusion_manifold.png)
 
 ### Forward Process
 
@@ -126,7 +126,7 @@ $$\tag{1}
 
 where $\beta_t \in (0,1)$ controls the amount of noise added at step $t$.
 
-**Note:** *$\beta_t$ follows a noise schedule $[\beta_0, ..., \beta_T]$. You can choose to learn this schedule or just set it beforehand. We will assume it is a set schedule like it is in the original paper (Ho et al., 2020).*
+Note: $\beta_t$ follows a noise schedule $[\beta_0, ..., \beta_T]$. You can choose to learn this schedule or just set it beforehand. We will assume it is a set schedule like it is in the original paper ([Ho, 2020](https://arxiv.org/abs/2006.11239)).
 
 Equivalently, we can express this transition as a conditional probability distribution:
 
@@ -198,7 +198,7 @@ $$q(x_t\mid x_0)
 
 This gives us a closed-form expression for sampling from any step of the forward process without computing all the preceding steps.
 
-![The linear schedule of Ho et al. (2020) with $T=1000$. Every individual $\beta_t$ is small (a), but $\bar\alpha_t$ compounds a thousand of them, so the signal coefficient $\sqrt{\bar\alpha_t}$ has collapsed and the noise coefficient $\sqrt{1-\bar\alpha_t}$ has saturated well before $t=T$ (b). The signal-to-noise ratio crosses $1$ at $t\approx 259$ (c). The dots in (b) mark the timesteps shown in the next figure.](figs/diffusion/noise_schedule.png)
+![The linear schedule ([Ho, 2020](https://arxiv.org/abs/2006.11239)) with $T=1000$. Every individual $\beta_t$ is small (a), but $\bar\alpha_t$ compounds a thousand of them, so the signal coefficient $\sqrt{\bar\alpha_t}$ has collapsed and the noise coefficient $\sqrt{1-\bar\alpha_t}$ has saturated well before $t=T$ (b). The signal-to-noise ratio crosses $1$ at $t\approx 259$ (c). The dots in (b) mark the timesteps shown in the next figure.](figs/diffusion/noise_schedule.png)
 
 Finally, if we choose a noise schedule such that $\bar{\alpha}_T \approx 0$, the contribution of the original sample vanishes while the noise covariance approaches $I$:
 
@@ -386,7 +386,7 @@ such that the learned reverse transition approximates the true reverse condition
 
 However, we just established that this true reverse conditional is generally intractable because it depends on the unknown data distribution. How can we train a network to approximate a distribution that we cannot evaluate?
 
-The key observation is that **during training, we know the original range image $x_0$** because it comes directly from our dataset. Although $q(x_{t-1}\mid x_t)$ is intractable, the conditional distribution $q(x_{t-1}\mid x_t,x_0)$ can be calculated analytically.
+The key observation is that during training, we know the original range image $x_0$ because it comes directly from our dataset. Although $q(x_{t-1}\mid x_t)$ is intractable, the conditional distribution $q(x_{t-1}\mid x_t,x_0)$ can be calculated analytically.
 
 ##### Deriving the Reverse Posterior
 
@@ -819,23 +819,23 @@ After repeating this process from $T$ down to $1$, we obtain a newly generated L
 
 ![The trained reverse process on a 2D toy (a Gaussian to two moons, the same toy the rectified flow figures use later on). Left: the sample $x_t$. Right: the clean sample the network's noise prediction implies, $\hat x_0=(x_t-\sqrt{1-\bar\alpha_t}\,\epsilon_\theta)/\sqrt{\bar\alpha_t}$. Early on that guess is the blurred average of the whole dataset; it only separates into two moons over the last couple of hundred steps.](figs/diffusion/reverse_chain_2d.gif)
 
-The important insight is that **we never needed to explicitly evaluate the probability density of real LiDAR observations**. Instead, we trained a network to predict noise added to real samples, and used those predictions to construct a generative process that transforms Gaussian noise into realistic range images.
+The important insight is that we never needed to explicitly evaluate the probability density of real LiDAR observations. Instead, we trained a network to predict noise added to real samples, and used those predictions to construct a generative process that transforms Gaussian noise into realistic range images.
 
 #### Where Diffusion Falls Short
 
 Diffusion models provide an elegant solution to our original problem: we can generate samples from a complex, unknown data distribution without ever explicitly evaluating its probability density. However, this approach comes with some limitations.
 
-The first is **computational cost during generation**. Although training allows us to sample any noise level directly using the closed-form forward process, generation requires repeatedly evaluating the neural network to move from noise back toward the data distribution. In the original DDPM formulation, this can require hundreds or thousands of sequential denoising steps. For high-dimensional data such as LiDAR range images, these repeated evaluations can make generation expensive.
+The first is computational cost during generation. Although training allows us to sample any noise level directly using the closed-form forward process, generation requires repeatedly evaluating the neural network to move from noise back toward the data distribution. In the original DDPM formulation, this can require hundreds or thousands of sequential denoising steps. For high-dimensional data such as LiDAR range images, these repeated evaluations can make generation expensive.
 
 ![The same trained model, sampled with an evenly strided schedule. Quality is the energy distance to a real batch of the same size, averaged over five batches of 3000 samples; the band is what two real batches score against each other. Below roughly 30 steps the samples visibly fall apart, and past about 60 steps more steps buy nothing measurable — but every step is another forward pass through the network, for every sample.](figs/diffusion/sampling_cost.png)
 
-The second limitation is that **we learn the transformation indirectly**. Recall that our original goal was to find a transformation that takes samples from a simple Gaussian distribution and moves them into the structured region occupied by real LiDAR observations. However, rather than learning this transformation directly, diffusion models construct a stochastic process that destroys the data, then train a network to predict the noise introduced by that process. We use these noise predictions to reconstruct the reverse transitions that ultimately generate new samples.
+The second limitation is that we learn the transformation indirectly. Recall that our original goal was to find a transformation that takes samples from a simple Gaussian distribution and moves them into the structured region occupied by real LiDAR observations. However, rather than learning this transformation directly, diffusion models construct a stochastic process that destroys the data, then train a network to predict the noise introduced by that process. We use these noise predictions to reconstruct the reverse transitions that ultimately generate new samples.
 
-This raises an interesting question: **what if we could learn how to move samples from the Gaussian distribution to the data distribution directly, without first defining a stochastic noising process and learning to reverse it?**
+This raises an interesting question: what if we could learn how to move samples from the Gaussian distribution to the data distribution directly, without first defining a stochastic noising process and learning to reverse it?
 
 Instead of repeatedly removing random noise, imagine assigning a velocity to every point in our high-dimensional space. A sample beginning in the Gaussian distribution could then follow this velocity field along a continuous trajectory toward the data distribution.
 
-This is the central idea behind **flow matching**. Rather than training a network to predict noise, we train it to predict a velocity field that transports one probability distribution into another.
+This is the central idea behind flow matching ([Lipman, 2023](https://arxiv.org/abs/2210.02747)). Rather than training a network to predict noise, we train it to predict a velocity field that transports one probability distribution into another.
 
 As we will see, this gives us a more direct way to formulate the generative problem, and it also opens the door to designing transport paths that can be integrated efficiently during generation.
 
@@ -843,21 +843,21 @@ As we will see, this gives us a more direct way to formulate the generative prob
 
 ### The continuity equation
 
-Diffusion describes how a density spreads when particles move *randomly*. Flow matching instead moves particles *deterministically*: every particle at position $x$ at time $t$ moves with a prescribed velocity,
+Diffusion describes how a density spreads when particles move randomly. Flow matching instead moves particles deterministically: every particle at position $x$ at time $t$ moves with a prescribed velocity,
 
 $$\frac{dx}{dt} = v(t,x).$$
 
-The velocity field $v$ assigns an arrow to every point in space, and any particle sitting at that point follows the arrow. Before we can ask which velocity field turns noise into LiDAR scans, we need to know how a velocity field changes a density. The answer is the *continuity equation*, and the easiest way to build it is with traffic.
+The velocity field $v$ assigns an arrow to every point in space, and any particle sitting at that point follows the arrow. Before we can ask which velocity field turns noise into LiDAR scans, we need to know how a velocity field changes a density. The answer is the continuity equation, and the easiest way to build it is with traffic.
 
 #### Cars on a road
 
-Consider a single-lane road, with position $x$ measured in kilometers. Let $\rho(x,t)$ be the *density* of cars: how many cars per kilometer are near position $x$ at time $t$. Let every car drive at velocity $v(t,x)$.
+Consider a single-lane road, with position $x$ measured in kilometers. Let $\rho(x,t)$ be the density of cars: how many cars per kilometer are near position $x$ at time $t$. Let every car drive at velocity $v(t,x)$.
 
 Two quantities matter:
 
--   **Density** $\rho$ (cars/km): how crowded the road is.
+-   Density $\rho$ (cars/km): how crowded the road is.
 
--   **Flux** $F = \rho\,v$ (cars/min): how many cars pass a fixed point per unit time.
+-   Flux $F = \rho\,v$ (cars/min): how many cars pass a fixed point per unit time.
 
 The flux needs both crowding and motion. A packed road at a standstill has zero flux, and so does an empty highway. At $20$ cars/km moving at $1$ km/min, $20$ cars pass you every minute.
 
@@ -878,13 +878,13 @@ where the last step is the fundamental theorem of calculus. But we can also diff
 
 $$\frac{dN}{dt} = \int_a^b \frac{\partial \rho}{\partial t}\,dx.$$
 
-These two integrals agree for *every* stretch of road, which is only possible if the integrands are equal everywhere:
+These two integrals agree for every stretch of road, which is only possible if the integrands are equal everywhere:
 
 $$\tag{3}
     \frac{\partial \rho}{\partial t}
     = -\frac{\partial}{\partial x}\big(\rho\,v\big).$$
 
-Read it as: *the rate at which a spot gets more crowded equals minus the net rate at which cars leave it.* The derivative $\partial_x(\rho v)$ is the net outflow: over a tiny stretch $[x, x+\Delta x]$, cars leave at rate $\rho v(x+\Delta x)$ and arrive at rate $\rho v(x)$, and their difference per unit length tends to $\partial_x(\rho v)$.
+Read it as: the rate at which a spot gets more crowded equals minus the net rate at which cars leave it. The derivative $\partial_x(\rho v)$ is the net outflow: over a tiny stretch $[x, x+\Delta x]$, cars leave at rate $\rho v(x+\Delta x)$ and arrive at rate $\rho v(x)$, and their difference per unit length tends to $\partial_x(\rho v)$.
 
 #### Constant speed: the jam slides
 
@@ -893,7 +893,7 @@ Now suppose every car drives at the same speed, $v = c$, say $c = 60$ km/h $= 1$
 $$\tag{4}
     \frac{\partial \rho}{\partial t} = -c\,\frac{\partial \rho}{\partial x}.$$
 
-How fast the crowding changes at a spot depends only on the *slope* of the density there. This makes sense: in a short time $dt$, the cars that arrive at $x$ are the ones that were just upstream at $x - c\,dt$, so
+How fast the crowding changes at a spot depends only on the slope of the density there. This makes sense: in a short time $dt$, the cars that arrive at $x$ are the ones that were just upstream at $x - c\,dt$, so
 
 $$\rho(x, t+dt) = \rho(x - c\,dt,\, t)
     \approx \rho(x,t) - c\,dt\,\frac{\partial \rho}{\partial x},$$
@@ -925,9 +925,9 @@ With $c = 1$ km/min, after one minute the jam is centered at $x = 1$ km:
 
 Eq. (4) predicts these trends from the slope alone. For a Gaussian, $\partial_x \rho_0 = -x\,\rho_0(x)$:
 
--   An observer $1$ km *ahead* of the jam sees slope $\partial_x\rho = -24.2$ cars/km$^2$, so $\partial_t\rho = +24.2$ cars/km per minute. The jam is coming, and the road gets more crowded.
+-   An observer $1$ km ahead of the jam sees slope $\partial_x\rho = -24.2$ cars/km$^2$, so $\partial_t\rho = +24.2$ cars/km per minute. The jam is coming, and the road gets more crowded.
 
--   An observer $1$ km *behind* sees slope $+24.2$, so $\partial_t\rho = -24.2$. The jam is leaving.
+-   An observer $1$ km behind sees slope $+24.2$, so $\partial_t\rho = -24.2$. The jam is leaving.
 
 -   An observer at the peak sees slope $0$, so $\partial_t\rho = 0$ for that instant. The top of the jam is flat; the road thins out only once the falling side reaches them.
 
@@ -935,7 +935,7 @@ Eq. (4) predicts these trends from the slope alone. For a Gaussian, $\partial_x 
 
 #### The driver's view
 
-A driver *inside* the jam sees something different. Every car moves at the same speed, so the gaps around them never change: the density they experience is constant for the whole trip. Nothing gets stretched or squeezed; the pattern is only carried along. Now imagine the cars ahead drive faster than the cars behind. The gaps open up and the jam thins out around every driver, even though no car has left the road. That is the extra term the product rule produces when the velocity varies in space,
+A driver inside the jam sees something different. Every car moves at the same speed, so the gaps around them never change: the density they experience is constant for the whole trip. Nothing gets stretched or squeezed; the pattern is only carried along. Now imagine the cars ahead drive faster than the cars behind. The gaps open up and the jam thins out around every driver, even though no car has left the road. That is the extra term the product rule produces when the velocity varies in space,
 
 $$\frac{\partial}{\partial x}\big(\rho\,v\big)
     = \underbrace{\rho\,\frac{\partial v}{\partial x}}_{\text{stretching}}
@@ -965,9 +965,9 @@ $$p_0 = \mathcal{N}(0,I)
 
 We cannot write one down directly. We have no formula for $p_{\mathrm{data}}$, only samples of it, so we cannot write the intermediate densities $p_t$ either, and without $p_t$ there is nothing to solve for $u_t$.
 
-Moving a Gaussian onto a *single* scan, however, is easy. So we solve that small problem for every scan in the dataset and then combine the answers.
+Moving a Gaussian onto a single scan, however, is easy. So we solve that small problem for every scan in the dataset and then combine the answers.
 
-From here on we switch to the naming convention used in the flow matching literature: $x_0 \sim \mathcal{N}(0,I)$ is *noise* and $x_1 \sim p_{\mathrm{data}}$ is *data*, and time runs from noise at $t=0$ to data at $t=1$. This is the reverse of the diffusion convention above.
+From here on we switch to the naming convention used in the flow matching literature: $x_0 \sim \mathcal{N}(0,I)$ is noise and $x_1 \sim p_{\mathrm{data}}$ is data, and time runs from noise at $t=0$ to data at $t=1$. This is the reverse of the diffusion convention above.
 
 #### One scan: a straight line
 
@@ -988,9 +988,9 @@ Because $x_t$ is an affine function of a Gaussian, it is Gaussian:
 $$\tag{8}
     p_t(x\mid x_1) = \mathcal{N}\!\big(x;\; t\,x_1,\; (1-t)^2 I\big).$$
 
-At $t=0$ this is $\mathcal{N}(0,I)$. As $t\to 1$ the mean slides to $x_1$ and the spread shrinks to zero, piling all of the mass onto the scan.[^1]
+At $t=0$ this is $\mathcal{N}(0,I)$. As $t\to 1$ the mean slides to $x_1$ and the spread shrinks to zero, piling all of the mass onto the scan.
 
-To use this as a velocity *field*, a function of position rather than of which particle we are following, solve Eq. (7) for the starting point of the particle currently at $x$, $x_0 = (x - t\,x_1)/(1-t)$, and substitute:
+To use this as a velocity field, a function of position rather than of which particle we are following, solve Eq. (7) for the starting point of the particle currently at $x$, $x_0 = (x - t\,x_1)/(1-t)$, and substitute:
 
 $$\tag{9}
     u_t(x\mid x_1)
@@ -1001,7 +1001,7 @@ This says: point at the target, and go fast enough to arrive on time. The remain
 
 ![The conditional path for one scan $x_1$. Every noise sample drives in a straight line at constant speed. The circles are the 1σ and 2σ contours of $p_t(x\mid x_1)=\mathcal{N}(t\,x_1,(1-t)^2 I)$: the mean slides toward $x_1$ and the spread shrinks to zero.](figs/flow_matching/conditional_path.gif)
 
-We call $p_t(x\mid x_1)$ and $u_t(x\mid x_1)$ the *conditional* path and *conditional* velocity, conditional on the scan $x_1$. Since the particles really do move with this velocity, the pair satisfies the continuity equation:
+We call $p_t(x\mid x_1)$ and $u_t(x\mid x_1)$ the conditional path and conditional velocity, conditional on the scan $x_1$. Since the particles really do move with this velocity, the pair satisfies the continuity equation:
 
 $$\tag{10}
     \frac{\partial p_t(x\mid x_1)}{\partial t}
@@ -1014,11 +1014,11 @@ Average the per-scan densities over the data:
 $$\tag{11}
     p_t(x) = \int p_t(x\mid x_1)\,p_{\mathrm{data}}(x_1)\,dx_1.$$
 
-At $t=0$ every conditional density is $\mathcal{N}(0,I)$, so the mixture is $\mathcal{N}(0,I)$. At $t=1$ every conditional density is concentrated on its own scan $x_1$, so the mixture places mass $p_{\mathrm{data}}(x_1)$ at each $x_1$, which is $p_{\mathrm{data}}$. This *marginal* path therefore starts at noise and ends at data. It is the path we want. What remains is to find the velocity field that moves particles along it.
+At $t=0$ every conditional density is $\mathcal{N}(0,I)$, so the mixture is $\mathcal{N}(0,I)$. At $t=1$ every conditional density is concentrated on its own scan $x_1$, so the mixture places mass $p_{\mathrm{data}}(x_1)$ at each $x_1$, which is $p_{\mathrm{data}}$. This marginal path therefore starts at noise and ends at data. It is the path we want. What remains is to find the velocity field that moves particles along it.
 
 #### Back to the highway
 
-Consider one spot on a two-lane highway. Lane A carries $30$ cars/km at $1$ km/min and lane B carries $10$ cars/km at $3$ km/min. The total density is $40$ cars/km and the total flux is $30\cdot 1 + 10\cdot 3 = 60$ cars/min. To describe all of the traffic as a single density moving with a single velocity, that velocity must satisfy $40\,v = 60$, so $v = 1.5$ km/min. This is not the plain average of the two speeds, which is $2$ km/min. It is the *density-weighted* average: the busier lane gets more say. This works because densities add, fluxes add, and the continuity equation depends only on density and flux.
+Consider one spot on a two-lane highway. Lane A carries $30$ cars/km at $1$ km/min and lane B carries $10$ cars/km at $3$ km/min. The total density is $40$ cars/km and the total flux is $30\cdot 1 + 10\cdot 3 = 60$ cars/min. To describe all of the traffic as a single density moving with a single velocity, that velocity must satisfy $40\,v = 60$, so $v = 1.5$ km/min. This is not the plain average of the two speeds, which is $2$ km/min. It is the density-weighted average: the busier lane gets more say. This works because densities add, fluxes add, and the continuity equation depends only on density and flux.
 
 #### The marginal velocity
 
@@ -1067,7 +1067,7 @@ Take a one-dimensional "dataset" of two points, $x_1 = -1$ and $x_1 = +1$, each 
 
 We now have a velocity field that provably carries noise to data, assembled from easy per-scan pieces. We still cannot compute it: Eq. (12) integrates over $p_{\mathrm{data}}$ and divides by $p_t(x)$, and we have neither. The next section shows that we never need to. Training a network to predict the easy conditional velocity $x_1 - x_0$ on random pairs recovers exactly the conditional expectation in Eq. (13).
 
-## Learning the field: the flow matching objective
+### Learning the field: the flow matching objective
 
 The previous section gave us a velocity field that provably carries noise to data,
 
@@ -1077,7 +1077,7 @@ but no way to compute it. Before turning to how we learn it, it is worth asking 
 
 #### Why not use the field directly?
 
-For the true data distribution we cannot evaluate $u_t$: it integrates over $p_{\mathrm{data}}$, which we do not have. We do, however, have a dataset of $N$ scans. Treating the dataset itself as the distribution, with probability $1/N$ on each scan $x_1^{(i)}$, turns the integral into a sum we *can* evaluate:
+For the true data distribution we cannot evaluate $u_t$: it integrates over $p_{\mathrm{data}}$, which we do not have. We do, however, have a dataset of $N$ scans. Treating the dataset itself as the distribution, with probability $1/N$ on each scan $x_1^{(i)}$, turns the integral into a sum we can evaluate:
 
 $$\tag{14}
     u_t(x) = \sum_{i=1}^{N} w_i(t,x)\,\frac{x_1^{(i)} - x}{1-t},
@@ -1087,11 +1087,11 @@ $$\tag{14}
 
 The weights are a softmax over how close $x$ is to each scan's path. There are two problems with integrating this field directly.
 
-First, it only reproduces the training set. As $t\to 1$ the conditional Gaussians shrink to zero width, the weights collapse onto a single scan, and the particle is pulled exactly onto it. In the two-point example, every particle ends at exactly $-1$ or $+1$; nothing ever lands in between. The exact field is an expensive nearest-neighbor lookup, which is the opposite of our goal of generating scans *without* reproducing the training data.
+First, it only reproduces the training set. As $t\to 1$ the conditional Gaussians shrink to zero width, the weights collapse onto a single scan, and the particle is pulled exactly onto it. In the two-point example, every particle ends at exactly $-1$ or $+1$; nothing ever lands in between. The exact field is an expensive nearest-neighbor lookup, which is the opposite of our goal of generating scans without reproducing the training data.
 
 Second, it is expensive. Each evaluation sums over the entire dataset, where every scan is a range image with tens of thousands of pixels, and it must be repeated at every integration step with the full dataset on hand.
 
-A neural network $v_\theta(t,x)$ fixes both. It compresses the field into a fixed set of weights with constant cost per step. And because it cannot reproduce the sharp switching of Eq. (14) near $t=1$, it learns a smoother field that lands *between* training scans. Those in-between points are new samples. **[TODO: optionally cite work on why diffusion and flow models generalize rather than memorize, e.g. Kadkhodaie et al., ICLR 2024; verify before citing.]**
+A neural network $v_\theta(t,x)$ fixes both. It compresses the field into a fixed set of weights with constant cost per step. And because it cannot reproduce the sharp switching of Eq. (14) near $t=1$, it learns a smoother field that lands between training scans. Those in-between points are new samples. [TODO: optionally cite work on why diffusion and flow models generalize rather than memorize, e.g. Kadkhodaie et al., ICLR 2024; verify before citing.]
 
 ![The same eight-point dataset and the same noise samples. Left: integrating the exact field (Eq. 14) puts every sample on a training point. Right: a small network trained with the flow matching loss below cannot reproduce the sharp switching near $t=1$, so most samples land on the ring between training points.](figs/flow_matching/exact_vs_learned.gif)
 
@@ -1108,7 +1108,7 @@ But the regression target $u_t(x_t)$ is exactly the quantity we cannot compute.
 
 #### The swap
 
-Replace the unknown target with the conditional velocity, which we *can* compute:
+Replace the unknown target with the conditional velocity, which we can compute:
 
 $$\tag{16}
     \mathcal{L}_{\mathrm{CFM}}(\theta)
@@ -1168,7 +1168,7 @@ It is minimized at $v = 0.75\cdot 1 + 0.25\cdot 3 = 1.5$ km/min, the same densit
 
 #### What the floor measures
 
-The constant $C$ is the average spread of the targets at each point. It is large when many straight-line pairs *cross* through the same $(t,x)$ heading in different directions, which is the same crossing that bends the trajectories in the two-point example. Two consequences follow. A flow matching training curve that plateaus above zero is expected, not a sign that something is broken. And reflow, by making each $x_1$ a deterministic function of its $x_0$, stops the pairs from crossing and drives $C$ toward zero, which is exactly the straightening it is designed to produce.
+The constant $C$ is the average spread of the targets at each point. It is large when many straight-line pairs cross through the same $(t,x)$ heading in different directions, which is the same crossing that bends the trajectories in the two-point example. Two consequences follow. A flow matching training curve that plateaus above zero is expected, not a sign that something is broken. And reflow, by making each $x_1$ a deterministic function of its $x_0$, stops the pairs from crossing and drives $C$ toward zero, which is exactly the straightening it is designed to produce.
 
 ![Training the network from the previous figure. The training loss $\mathcal{L}_{\mathrm{CFM}}$ (blue) plateaus near the floor $C$ (dashed), which we estimate from the exact field. The loss we actually care about, $\mathcal{L}_{\mathrm{FM}}$ (orange), keeps falling. On a held-out batch $\mathcal{L}_{\mathrm{CFM}} = 4.13$ and $\mathcal{L}_{\mathrm{FM}} + C = 4.12$, which checks Eq. (17).](figs/flow_matching/cfm_loss_floor.png)
 
@@ -1187,13 +1187,13 @@ $$\tag{18}
             = \mathbb{E}_{t,\,x_0,\,x_1}\,
               \big\|\,v_\theta(t, x_t) - (x_1 - x_0)\,\big\|^2.$$
 
-There is no noise schedule, no score, and no $\beta_t$. The pointwise argument needs every $t$ to receive some weight but not equal weight, so $t$ may be drawn from any distribution covering $[0,1]$; this is why the U-shaped timestep sampler of Lee et al. used in our repository changes where training effort goes without changing the minimizer. In our codebase this objective is `torchcfm`'s `ConditionalFlowMatcher` with `sigma=0`, which the repository's comment describes as "equivalent to 1-rectified flow if sigma is 0" (`train.py`). Setting `sigma>0` adds a small Gaussian spread around each straight path, and the repository also offers an optimal-transport pairing (`otcfm`) in place of random pairing of $x_0$ and $x_1$.
+There is no noise schedule, no score, and no $\beta_t$. The pointwise argument needs every $t$ to receive some weight but not equal weight, so $t$ may be drawn from any distribution covering $[0,1]$; this is why the U-shaped timestep sampler ([Lee, 2024](https://arxiv.org/abs/2405.20320)) used in our repository changes where training effort goes without changing the minimizer. In our codebase this objective is the `ConditionalFlowMatcher` from [`torchcfm`](https://github.com/atong01/conditional-flow-matching) ([Tong, 2023](https://arxiv.org/abs/2302.00482)) with `sigma=0`, which the repository's comment describes as "equivalent to 1-rectified flow if sigma is 0" (`train.py`). Setting `sigma>0` adds a small Gaussian spread around each straight path, and the repository also offers an optimal-transport pairing (`otcfm`) in place of random pairing of $x_0$ and $x_1$.
 
 ## Rectified flow
 
 #### Why does regressing on one straight line give a field that works?
 
-Many different $(x_0,x_1)$ pairs pass through the same point $(t,x)$ with different velocities. The minimizer of the squared loss is their average, $v^\star(t,x)=\mathbb E[x_1-x_0\mid x_t=x]$, and the flow defined by that conditional mean transports $\mathcal N(0,I)$ to $p_{\text{data}}$ exactly. **[TODO: decide whether to include the short proof or cite Lipman et al. 2023 / Liu et al. 2023.]** This is the same "best predictor is a conditional expectation" argument as the best linear predictor from Part 2, just without the restriction to linear.
+Many different $(x_0,x_1)$ pairs pass through the same point $(t,x)$ with different velocities. The minimizer of the squared loss is their average, $v^\star(t,x)=\mathbb E[x_1-x_0\mid x_t=x]$, and the flow defined by that conditional mean transports $\mathcal N(0,I)$ to $p_{\text{data}}$ exactly ([Lipman, 2023](https://arxiv.org/abs/2210.02747)).
 
 #### Connection to Part 5 (sampling)
 
@@ -1203,7 +1203,7 @@ In the course we sampled a Gaussian by pushing standard normal draws through a m
 
 If the learned trajectories were perfectly straight, one Euler step would be exact: $x_1 = x_0 + v_\theta(0,x_0)$. They are not straight, because the conditional-mean field averages over crossing paths, so the true trajectories curve. Euler's global error scales with step size times curvature, so more curvature means more steps for the same accuracy. This is the same trade the reference posts on numerical stability are about (Gundersen on conditioning, Cook on two-pass vs. one-pass variance): the same quantity computed two ways, and the cheap way costs you digits in a regime you can predict.
 
-**Reflow** is the fix. Train a first model (1-RF). Use it to generate $(x_0, x_1)$ pairs by running the ODE, where $x_1$ is now *generated* from the specific $x_0$. Retrain on those coupled pairs (2-RF). Because each $x_1$ is a deterministic function of its $x_0$, the straight-line targets no longer cross, so the new field is straighter and fewer steps suffice. Optionally distill further to 1–4 steps ($k$-TD).
+Reflow is the fix. Train a first model (1-RF). Use it to generate $(x_0, x_1)$ pairs by running the ODE, where $x_1$ is now generated from the specific $x_0$. Retrain on those coupled pairs (2-RF). Because each $x_1$ is a deterministic function of its $x_0$, the straight-line targets no longer cross, so the new field is straighter and fewer steps suffice. Optionally distill further to 1–4 steps ($k$-TD).
 
 ![Reflow on a toy problem, from a Gaussian to two moons. Both models start from the same noise. 1-RF, trained on random pairs, follows curved paths. 2-RF, retrained on 1-RF's own $(x_0, x_1)$ pairs, follows nearly straight ones. $S$ is the mean squared deviation of the velocity from the straight-line displacement.](figs/flow_matching/reflow.gif)
 
@@ -1211,21 +1211,21 @@ If the learned trajectories were perfectly straight, one Euler step would be exa
 
 # LiDAR as an image
 
-Diffusion and flow models are most developed for images, so the common trick is to turn a scan into one. A spinning LiDAR sweeps azimuth and elevation, so each return at range $r$, azimuth $\phi$, elevation $\theta$ is placed in pixel $(\text{row}(\theta),\text{col}(\phi))$ with value $r$. That gives a **range image** of shape $H\times W$, where $H$ is the number of beams.
+Diffusion and flow models are most developed for images, so the common trick is to turn a scan into one. A spinning LiDAR sweeps azimuth and elevation, so each return at range $r$, azimuth $\phi$, elevation $\theta$ is placed in pixel $(\text{row}(\theta),\text{col}(\phi))$ with value $r$. That gives a range image of shape $H\times W$, where $H$ is the number of beams.
 
 Details that matter, taken from the repo's `LiDARUtility` and data docs:
 
--   **Channels.** Depth, optionally reflectance. Missing returns ("raydrop") are encoded as an out-of-range value; after log-scale encoding an empty pixel is exactly $-1$.
+-   Channels. Depth, optionally reflectance. Missing returns ("raydrop") are encoded as an out-of-range value; after log-scale encoding an empty pixel is exactly $-1$.
 
--   **Depth normalization.** The pretrained KITTI-360 model uses a log scale, $\log(r+1)/\log(r_{\max}+1)$, over a $[1.45, 80]$ m window, so near range gets more resolution than far range.
+-   Depth normalization. The pretrained KITTI-360 model uses a log scale, $\log(r+1)/\log(r_{\max}+1)$, over a $[1.45, 80]$ m window, so near range gets more resolution than far range.
 
--   **Round trip.** Range image to point cloud is just the inverse spherical projection using the known ray angles, so nothing is lost beyond quantization to the grid.
+-   Round trip. Range image to point cloud is just the inverse spherical projection using the known ray angles, so nothing is lost beyond quantization to the grid.
 
 The network is an HDiT (hierarchical diffusion transformer with neighborhood attention, about 80.9M parameters per the repo's table), with a learnable positional embedding tied to the token grid.
 
 # R2Flow
 
-R2Flow (Nakashima et al., ICRA 2025, *Fast LiDAR Data Generation with Rectified Flows*) combines the pieces above: rectified flow on range images, then reflow, then timestep distillation, to generate LiDAR in few steps. **[TODO: pull one headline number from the paper (steps vs. quality vs. R2DM) after we confirm it directly from the arXiv PDF 2412.02241 rather than from memory.]**
+R2Flow ([Nakashima, 2025](https://arxiv.org/abs/2412.02241)) combines the pieces above: rectified flow on range images, then reflow, then timestep distillation, to generate LiDAR in few steps.
 
 The repo's three-stage recipe:
 
@@ -1235,100 +1235,9 @@ The repo's three-stage recipe:
 | 2-RF   | start from 1-RF, reflow          | 1M $(x_0,x_1)$ pairs from 1-RF using `dopri5` |
 | $k$-TD | start from 2-RF, $k\in\{1,2,4\}$ | 100k pairs from 2-RF                          |
 
-# Our setting: Go2-W, simulated and real
+![Samples from R2Flow while it fine-tunes on our simulated Go2-W navigation scans ($64\times1024$), starting from the KITTI-360 1-RF weights. Each panel is the bird's eye view of one generated scan, sampled from the EMA model with `dopri5`. The frames show every logged sample, one per 1k optimizer steps from 1k to 50k (8k to 400k training images at batch size 8). At 1k steps the scans are still blurry blobs with no clear walls; over training they settle into the walls and corridors of the simulated building.](figs/lidar_r2flow/r2flow_samples.gif)
 
-Our lab's question is not "can we generate KITTI scans" but "can we use a generative model to bridge simulated and real LiDAR on a Unitree Go2-W robot." Everything below is from our fork's docs and code; **[TODO: confirm names and framing with the team]**.
+# The Application
 
-#### Data
+This research was inspired by DRUM ([Miyawaki, 2026](https://arxiv.org/abs/2603.26263)), which uses diffusion techniques to generate semantically labeled, realisitc LiDAR scans, which they used to train a downstream semantic LiDAR classifier. Our idea was to see if we could reverse the process, train a model that could take real, noisy LiDAR scans and map them to the clean simulated LiDAR distribution. The GIF above shows that the R2Flow model ([Nakashima, 2025](https://arxiv.org/abs/2412.02241)) can be fine-tuned to generate simulated LiDAR scans from our Isaacsim environment, next steps will be figuring out how to map the real scans to the simulated distribution, and then use those generated scans to train a downstream model for semantic segmentation. 
 
-**[TODO: this is where the `lidargen` repo would be described. It was not accessible when this draft was written. See open questions.]** The fork's converters turn ROS bags into range-image datasets:
-
--   Simulated Livox: 40 rings, $-28.2^\circ$ to $+29.5^\circ$, grid $40\times512$.
-
--   Simulated L1 (front-mounted, closest to the real robot): $64\times512$ over the lower hemisphere.
-
--   Simulated navigation episodes: $64\times1024$ over $-24^\circ$ to $+12^\circ$, chosen so the pretrained KITTI-360 weights load unchanged.
-
--   Real Go2 `utlidar` L1 bags, accumulated over several messages because one message is a $\sim$<!-- -->65 ms slice of a non-repetitive spiral.
-
-#### Fine-tuning
-
-Start from the released `r2flow-kitti360-1rf` weights, keep only the depth channel of the two layers that depend on channel count, and train on the simulated scans at a low learning rate ($2\times10^{-5}$). Start from 1-RF rather than 2-RF because training on real data with fresh noise undoes reflow's straightening anyway.
-
-#### A domain-gap probe
-
-The model is unconditional: it has no encoder, so "running a real scan through it" is transport, not reconstruction. The fork's `visualize_flow.py` substitutes a real scan for the Gaussian $x_0$ and Euler-integrates, keeping every state:
-
-$$x_{k+1} = x_k + \tfrac1N\,v_\theta(t_k, x_k),\qquad t_k = k/N.$$
-
-How far an input moves is a read on whether it is in-distribution. The docs report that sim scans keep their walls and doorways through all 8 steps, while the real Go2 scan loses its structure by step 6 and becomes a smooth sim-like gradient. The docs are careful to say this is a *probe*, not translation, and list why the real bag is far out of distribution (different elevation band, median range 0.42 m, 93% of returns within 1.45 m, mostly the robot's body).
-
-**[TODO: figure. Reproduce the 9-panel range-image strip for one sim scan and one real scan. Needs a checkpoint and GPU; ask team which checkpoint to use.]**
-
-# Measuring it honestly
-
-The fork has an evaluation pipeline for "did this change help." Three design choices are worth a section because they are the statistical-estimation content of the project:
-
-1.  **Null floors.** A reference-vs-reference score is not zero when the data is one continuous trajectory. The docs measure three floors (random, interleaved, contiguous splits) and get an increasing ordering consistent with scene drift. Reading a model's score against zero credits it with a gap that is just drift.
-
-2.  **A control for density.** Sim scans are about 80% filled and real about 39%, so a sim-vs-real gap could be explained by point count alone. An extra arm A$'$ randomly matches fill to real to separate "domains differ" from "one has more points."
-
-3.  **Effective sample size.** Extra noise draws per scan are correlated, so $n \neq \text{scans}\times\text{repeats}$. The design effect $1+(K-1)\,\mathrm{ICC}$ gives an $n_{\text{eff}}$, and confidence intervals use block *subsampling* because a bootstrap's resampled duplicates put maximal-kernel self-pairs into a U-statistic and bias KID upward.
-
-One result from the docs that ties back to [Straightness is a numerical-analysis statement](#straightness-is-a-numerical-analysis-statement). Integrating a 1-RF model *near* $t=1$ makes the data worse, not better:
-
-| $t_0$ |  Euler steps |  FRID |
-|------:|-------------:|------:|
-| 0.995 |            1 | 0.098 |
-|  0.99 |            3 | 0.157 |
-|  0.95 |           13 |  5.27 |
-|   0.9 |           26 |  3.52 |
-|   1.0 | 0 (identity) | 0.107 |
-
-The docs flag this as a first run on 158 scans with $N_{\text{eff}}\approx 40$: it shapes how to read the numbers but decides nothing. They attribute it to high trajectory curvature near the endpoints of 1-RF, which is the curvature argument from that section, and note that reflow is the paper's fix. **[TODO: decide whether to rerun this ourselves with a 2-RF checkpoint, which would make a clean "straightening helps" figure.]**
-
-# Our experiment
-
-**[TODO: This is the section that makes the post ours. Pick one, scoped to what we can finish before the deadline.]**
-
--   **Option A, straightness.** For a trained 1-RF and 2-RF, plot sample quality against Euler steps $\{1,2,4,8,16,32,\text{dopri5}\}$. Prediction: 2-RF reaches the plateau in far fewer steps.
-
--   **Option B, curvature measured directly.** Compute $\int_0^1\|v_\theta(t,x_t)-(x_1-x_0)\|^2dt$ along sampled trajectories as a straightness score, and relate it to Euler error.
-
--   **Option C, transport as a probe.** Quantify how far sim vs. real scans move under the flow as a function of $t_0$, with the null floor and fill-matched control from [Measuring it honestly](#measuring-it-honestly).
-
-**[TODO: results, plots, compute used.]**
-
-# Takeaways
-
--   Diffusion and flow matching differ in what the network regresses, not in the goal. Flow matching's target is a constant velocity along a straight line between noise and data.
-
--   Sampling cost is ODE-integration cost. Straight trajectories mean few steps, and reflow buys straightness.
-
--   LiDAR becomes tractable as an image problem via spherical projection, but sensor geometry, fill fraction, and depth normalization decide whether a pretrained model transfers.
-
--   Evaluating generative models on small, temporally correlated robot data needs null floors, density controls, and effective sample sizes, or you will read drift as signal.
-
-# References {#references .unnumbered}
-
-**[TODO: finalize format; verify each before submission.]**
-
--   Nakashima et al., *Fast LiDAR Data Generation with Rectified Flows*, ICRA 2025, arXiv:2412.02241.
-
--   Lipman et al., *Flow Matching for Generative Modeling*, ICLR 2023.
-
--   Liu et al., *Flow Straight and Fast: Learning to Generate and Transfer Data with Rectified Flow*, ICLR 2023.
-
--   Ho et al., *Denoising Diffusion Probabilistic Models*, NeurIPS 2020.
-
--   Song et al., *Score-Based Generative Modeling through Stochastic Differential Equations*, ICLR 2021.
-
--   Lee et al., *Improving the Training of Rectified Flows*, arXiv:2405.20320 (the U-shaped timestep sampler in the repo).
-
--   Tong et al., `torchcfm`, <https://github.com/atong01/conditional-flow-matching>.
-
--   Reference posts for style: Gundersen (matrix inversion), Epperly (Gaussians in trace estimation), Cook (three ways to compute standard deviation).
-
--   **[TODO: lidargen / LiDARGen (Zyrianov et al., ECCV 2022) if relevant.]**
-
-[^1]: At exactly $t=1$ this is a point mass. In practice one keeps a small minimum spread $\sigma$; this is the `sigma` argument of `torchcfm`, which our configuration sets to zero.
