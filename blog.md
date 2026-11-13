@@ -1,7 +1,8 @@
 ---
-Authors:
- Isaac Peterson and Jacob Morrey
-Title: "From Noise to Point Clouds: Flow Matching for LiDAR"
+title: "From Noise to Point Clouds: Flow Matching for LiDAR"
+author:
+  - Isaac Peterson
+  - Jacob Morrey
 ---
 
 # Why a state estimator cares about generating LiDAR
