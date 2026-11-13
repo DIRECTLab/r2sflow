@@ -1,3 +1,7 @@
+# Lidar Real2Sim
+
+https://directlab.github.io/r2sflow/
+
 # R2Flow
 
 * This is the official implementation of our **ICRA 2025** paper, **"Fast LiDAR Data Generation with Rectified Flows"**.
