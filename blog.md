@@ -496,16 +496,144 @@ In the original DDPM formulation, these KL terms arise from a variational lower 
 For Gaussian distributions with fixed covariance, minimizing the KL divergence with respect to the predicted mean is equivalent, up to a timestep-dependent weighting, to minimizing the squared error between their means:
 
 $$
-\mathcal{L}_t
-\propto
+\mathcal L_t
+=
+\frac{1}{2\sigma_t^2}
 \left\|
 \tilde\mu_t(x_t,x_0)
 -
 \mu_\theta(x_t,t)
-\right\|^2.
+\right\|^2
++
+C
 $$
 
-So we could train a neural network to predict the mean of the reverse Gaussian directly. However, DDPMs use a particularly useful alternative: instead of predicting the reverse mean, the network predicts the Gaussian noise that was added to the original image.
+<details>
+<summary><strong>Why does KL divergence reduce to the squared error between the Gaussian means?</strong></summary>
+
+Recall that both our true reverse posterior and learned reverse transition are modeled as Gaussian distributions:
+
+$$
+q(x_{t-1}\mid x_t,x_0)
+=
+\mathcal N(x_{t-1};\tilde\mu_t,\tilde\beta_t I),
+$$
+
+$$
+p_\theta(x_{t-1}\mid x_t)
+=
+\mathcal N(x_{t-1};\mu_\theta,\sigma_t^2 I).
+$$
+
+Here we assume the variance $\sigma_t^2$ of the learned reverse transition is fixed, meaning the neural network only needs to learn its mean $\mu_\theta$.
+
+By definition, the KL divergence between these distributions is
+
+$$
+D_{\mathrm{KL}}(q\|p_\theta)
+=
+\mathbb E_{x\sim q}
+\left[
+\log q(x)-\log p_\theta(x)
+\right],
+$$
+
+where $x$ represents $x_{t-1}$ for simplicity.
+
+The first term, $\mathbb E_q[\log q(x)]$, does not depend on our neural network parameters $\theta$, so we can treat it as a constant:
+
+$$
+D_{\mathrm{KL}}(q\|p_\theta)
+=
+-\mathbb E_q[\log p_\theta(x)]+C_1.
+$$
+
+The negative log-density of a $d$-dimensional isotropic Gaussian is:
+
+$$
+-\log p_\theta(x)
+=
+\frac{d}{2}\log(2\pi\sigma_t^2)
++
+\frac{1}{2\sigma_t^2}
+\|x-\mu_\theta\|^2.
+$$
+
+Since $\sigma_t^2$ is fixed, the logarithmic term is also constant with respect to $\theta$. Substituting into the KL divergence gives
+
+$$
+D_{\mathrm{KL}}(q\|p_\theta)
+=
+\frac{1}{2\sigma_t^2}
+\mathbb E_q[\|x-\mu_\theta\|^2]+C_2.
+$$
+
+We have reduced the KL divergence to an expected squared error. However, this is still the error between a random sample $x$ from the true posterior and the predicted mean $\mu_\theta$.
+
+To simplify further, write a sample from the true posterior as
+
+$$
+x=\tilde\mu_t+\delta,
+\qquad
+\mathbb E_q[\delta]=0,
+\qquad
+\operatorname{Cov}_q(\delta)=\tilde\beta_t I.
+$$
+
+Expanding the squared error,
+
+$$
+\begin{aligned}
+\mathbb E_q[\|x-\mu_\theta\|^2]
+&=
+\mathbb E_q[\|\tilde\mu_t+\delta-\mu_\theta\|^2]\\
+&=
+\|\tilde\mu_t-\mu_\theta\|^2
++
+2(\tilde\mu_t-\mu_\theta)^\top\mathbb E_q[\delta]
++
+\mathbb E_q[\|\delta\|^2].
+\end{aligned}
+$$
+
+The middle term vanishes because $\mathbb E_q[\delta]=0$. The final term equals $d\tilde\beta_t$, which is independent of $\theta$.
+
+Therefore,
+
+$$
+\mathbb E_q[\|x-\mu_\theta\|^2]
+=
+\|\tilde\mu_t-\mu_\theta\|^2
++
+d\tilde\beta_t.
+$$
+
+Substituting back into our KL divergence, and absorbing all terms independent of $\theta$ into a constant, gives
+
+$$
+\boxed{
+\mathcal L_t
+=
+\frac{1}{2\sigma_t^2}
+\left\|
+\tilde\mu_t(x_t,x_0)
+-
+\mu_\theta(x_t,t)
+\right\|^2
++
+C
+}
+$$
+
+Thus, **minimizing the KL divergence between two Gaussians with fixed covariance matrices is equivalent to minimizing a weighted squared error between their means**.
+
+The factor $1/(2\sigma_t^2)$ determines how strongly errors in the predicted mean are penalized. A narrow Gaussian assigns much lower probability to samples far from its mean, so mean-prediction errors produce a larger KL divergence.
+
+</details>
+
+It is important to note that the $\frac{1}{2\sigma_t^2}$ term in the above loss depends on what $\beta_t$ is, meaning this term is different at each timestep $t$ because our fixed noise schedule varies $\beta$ at each timestep. This is why we call $\frac{1}{2\sigma_t^2}$ a timestep dependent weighting.
+
+So we could train a neural network to predict the mean of the reverse Gaussian directly. However, DDPM chooses a particularly useful alternative: instead of predicting the reverse mean, the network predicts the Gaussian noise that was added to the original image.
 
 ##### Predicting Noise Instead of the Reverse Mean
 
@@ -564,31 +692,98 @@ $$
 
 Rather than directly predicting a less-noisy range image, the network learns to estimate the noise present in the current image. We can then use that prediction to calculate the mean of the reverse transition.
 
-Since we generate the noisy training images ourselves, we know exactly which noise $\epsilon$ was added. This gives us a straightforward supervised learning objective:
+Since we generate the noisy training images ourselves, we know the exact noise $\epsilon$ that was added. The network's only job is to guess it back, so the objective is an ordinary mean squared error between the noise we added and the noise the network predicts:
 
 $$
 \boxed{
 \mathcal{L}_{\mathrm{simple}}(\theta)
 =
-\mathbb{E}_{\substack{
-x_0\sim p_{\mathrm{data}}\\
-t\sim\mathcal{U}\{1,\ldots,T\}\\
-\epsilon\sim\mathcal{N}(0,I)
-}}
-\left[
+\mathbb{E}\left[
 \left\|
-\epsilon-
-\epsilon_\theta\left(
-\sqrt{\bar\alpha_t}x_0+
-\sqrt{1-\bar\alpha_t}\epsilon,
-t
-\right)
+\epsilon-\epsilon_\theta(x_t,t)
 \right\|^2
 \right]
 }
 $$
 
-This is the simplified noise-prediction objective used in the original DDPM paper (Ho et al., 2020). It drops the timestep-dependent weighting that appears in the likelihood-based objective, but works well in practice.
+where the expectation is taken over a training image $x_0\sim p_{\mathrm{data}}$, a timestep $t\sim\mathcal{U}\{1,\ldots,T\}$, and a noise draw $\epsilon\sim\mathcal{N}(0,I)$, with
+
+$$
+x_t=\sqrt{\bar\alpha_t}x_0+\sqrt{1-\bar\alpha_t}\epsilon.
+$$
+
+This is the simplified noise-prediction objective used in the original DDPM paper (Ho et al., 2020). The word *simplified* refers to removing the timestep-dependent weighting that arises from the original likelihood-based objective. Specifically, the Gaussian KL divergence produces a weighted noise-prediction error,
+
+$$
+w_t|\epsilon-\epsilon_\theta(x_t,t)|^2+C,
+\qquad
+w_t=
+\frac{\beta_t^2}
+{2\sigma_t^2\alpha_t(1-\bar\alpha_t)}.
+$$
+
+The simplified objective sets $w_t=1$ for every timestep, giving each noise level equal weight in expectation when timesteps are sampled uniformly. Ho et al. found that this reweighting improves sample quality in their experiments, even though it no longer corresponds exactly to the original likelihood-based objective.
+
+<details>
+<summary><strong>Where the timestep weighting comes from, and why dropping it helps</strong></summary>
+
+Because we fixed the reverse variance to an untrained constant $\sigma_t^2$, the KL divergence between two Gaussians that differ only in their means collapses to a scaled squared error,
+
+$$
+\mathcal{L}_t
+=
+D_{\mathrm{KL}}\left(
+q(x_{t-1}\mid x_t,x_0)
+\;\|\;
+p_\theta(x_{t-1}\mid x_t)
+\right)
+=
+\frac{1}{2\sigma_t^2}
+\left\|
+\tilde\mu_t(x_t,x_0)-\mu_\theta(x_t,t)
+\right\|^2
++
+C,
+$$
+
+where $C$ collects the trace and log-determinant terms, which do not depend on $\theta$. The weighting $1/(2\sigma_t^2)$ is already timestep-dependent. Substituting the noise parameterization for both means, the difference becomes
+
+$$
+\tilde\mu_t-\mu_\theta
+=
+\frac{\beta_t}{\sqrt{\alpha_t}\sqrt{1-\bar\alpha_t}}
+\left(
+\epsilon_\theta(x_t,t)-\epsilon
+\right),
+$$
+
+so the per-timestep objective is a *weighted* version of the loss we actually use:
+
+$$
+\mathcal{L}_t
+=
+\underbrace{
+\frac{\beta_t^2}
+{2\sigma_t^2\alpha_t(1-\bar\alpha_t)}
+}_{w_t}
+\left\|
+\epsilon-\epsilon_\theta(x_t,t)
+\right\|^2
++
+C.
+$$
+
+With the linear schedule used here and $\sigma_t^2=\beta_t$, the weight $w_t$ runs from $0.50$ at $t=1$ down to a minimum of $0.0050$ around $t=350$, then back up to $0.010$ at $t=T$. The consequence is severe: the first ten timesteps, one percent of the schedule, carry seventeen percent of the total weight, and the first hundred carry thirty-seven percent. Those earliest steps are the ones that resolve imperceptibly fine detail, where $x_t$ is already almost clean. They dominate the likelihood, but they contribute almost nothing to whether a generated scan looks like a real one. Setting $w_t=1$ reallocates that budget toward the middle and late steps, where the large-scale structure of the scene is actually decided.
+
+The full objective is also more awkward to work with than the weighted sum above suggests.
+
+- **The $t=1$ term is degenerate.** Since $\tilde\beta_1=0$, the posterior at the last step is a point mass and the KL against a Gaussian is not finite. DDPM handles $\mathcal{L}_0$ with a separate discrete decoder that integrates a Gaussian density over the bin width of each pixel, which is an entirely different computation from the other $T-1$ terms.
+- **It gives a noisy gradient.** We cannot afford all $T$ terms per update, so we sample one $t$ and rescale. Because the $w_t$ span two orders of magnitude, that estimator has high variance. Nichol and Dhariwal (2021) found the full bound "quite difficult to optimize in practice" for exactly this reason, and had to add importance sampling over $t$, with $p_t\propto\sqrt{\mathbb{E}[\mathcal{L}_t^2]}$ estimated from a running history of past loss values, to make it behave.
+- **It couples to the variance.** The terms dropped into $C$ above are constant only because $\sigma_t^2$ is fixed. If you want to *learn* the reverse variances, those terms come back, and the objective has to be rebalanced — Nichol and Dhariwal use $\mathcal{L}_{\mathrm{hybrid}}=\mathcal{L}_{\mathrm{simple}}+\lambda\mathcal{L}_{\mathrm{vlb}}$ with $\lambda=0.001$ and a stop-gradient on $\mu_\theta$, so that the bound shapes only the variance.
+
+Per optimizer step the cost is nearly identical — both objectives need exactly one forward pass of $\epsilon_\theta$. What the simplified loss buys is the removal of all of the above: no special-cased final step, no variance bookkeeping, no importance sampling, and a gradient estimator that is well behaved under a plain uniform draw of $t$.
+
+</details>
 
 ##### Putting It All Together
 
