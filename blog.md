@@ -1,16 +1,16 @@
 ---
-author:
-- Isaac Peterson and Jacob Morrey
-title: "From Noise to Point Clouds: Flow Matching for LiDAR"
+Authors:
+ Isaac Peterson and Jacob Morrey
+Title: "From Noise to Point Clouds: Flow Matching for LiDAR"
 ---
 
 # Why a state estimator cares about generating LiDAR
 
 A Kalman filter needs a measurement model: given the state, what does the sensor report? For a spinning LiDAR in a real building that model is hopeless to write down. Returns depend on materials, incidence angle, clutter, and the robot's own body. What we can do is collect scans and learn the distribution of what a scan looks like.
 
-That is a generative model: a way to draw samples from $p(\text{scan})$. Once you have one, you can (a) fill in simulated data that looks real, (b) check whether a real scan is in-distribution, and (c) use it as a prior in a Bayesian update, which is the structure of everything we did in Parts 8 and 9 of the course.
+That is a generative model: a way to draw samples from $p(\text{scan})$. Once you have one, you can (a) fill in simulated data that looks real, (b) check whether a real scan is in-distribution, and (c) use it as a prior in a Bayesian update.
 
-This post is about one family of generative models, diffusion and flow matching, and one application of it, LiDAR range images. We cover the math, then the specific model our lab uses, R2Flow ([Nakashima, 2025](https://arxiv.org/abs/2412.02241)), then what happened when we pointed it at a Unitree Go2-W robot, simulated and real.
+This post is about one family of generative models, diffusion and flow matching, and one application of it, LiDAR range images. We cover the math, then the specific model our lab uses, R2Flow ([Nakashima, 2025](https://arxiv.org/abs/2412.02241)), then what happened when we pointed it at a Unitree Go2 robot with LiDAR in simulation.
 
 # Building the Theory
 
@@ -28,7 +28,7 @@ In other words, we want to generate new range images that are statistically indi
 
 One way to understand this problem is to consider the geometry of the data distribution. Although a LiDAR range image may contain thousands of values, those values are not independent. They are constrained by the geometry of the environment, the position and orientation of the sensor, and the physical characteristics of the measurement process.
 
-Consequently, realistic range images occupy only a small, highly structured region of the space of all possible range images. We can think of this region as a data manifold, $\mathcal{M} \subseteq \mathbb{R}^d$, on or near which real observations are concentrated. (This is a common assumption in machine learning called the manifold hypothesis, go [here](https://www.youtube.com/watch?v=d-FJfOQsqLI) for a good explainer.)
+Consequently, realistic range images occupy only a small, highly structured region of the space of all possible range images. We can think of this region as a data manifold, $\mathcal{M} \subseteq \mathbb{R}^d$, on or near which real observations are concentrated. This is a common assumption in machine learning called the manifold hypothesis, a statistical exploration can be found in [Whiteley, 2026](https://arxiv.org/abs/2208.11665).
 
 From this perspective, generating a realistic range image amounts to producing a point on or near this manifold. An arbitrary point in the ambient space is unlikely to represent a physically plausible observation, but a point in the region occupied by real data is much more likely to exhibit the structure we want.
 
