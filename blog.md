@@ -5,11 +5,9 @@ author:
   - Jacob Morrey
 ---
 
-# Why a state estimator cares about generating LiDAR
+# The Motivation
 
-A Kalman filter needs a measurement model: given the state, what does the sensor report? For a spinning LiDAR in a real building that model is hopeless to write down. Returns depend on materials, incidence angle, clutter, and the robot's own body. What we can do is collect scans and learn the distribution of what a scan looks like.
-
-That is a generative model: a way to draw samples from $p(\text{scan})$. Once you have one, you can (a) fill in simulated data that looks real, (b) check whether a real scan is in-distribution, and (c) use it as a prior in a Bayesian update.
+LiDAR sensors are a common tool for autonomous mobile robots, but they are prone to failure in certain evnironments, for example the way the lasers interact with glass or othre glossy surfaces can cause the issue of "ghost points" in the point cloud. This can be a problem for downstream tasks like mapping and localization, which rely on accurate sensor data. One way to address this is to use generative models to produce new LiDAR range images that are mapped to the distribution of simulated data, which doesn't have these issues by nature of the simiulation. This allows us to "fill in" missing or corrupted data, improving the quality of the point cloud and the performance of downstream tasks.
 
 This post is about one family of generative models, diffusion and flow matching, and one application of it, LiDAR range images. We cover the math, then the specific model our lab uses, R2Flow ([Nakashima, 2025](https://arxiv.org/abs/2412.02241)), then what happened when we pointed it at a Unitree Go2 robot with LiDAR in simulation.
 
@@ -878,6 +876,22 @@ As we will see, this gives us a more direct way to formulate the generative prob
 
 ## Flow matching
 
+### The Spoiler
+For us it was helpful to understand the end goal of flow matching before diving into the theory that makes it work. The idea is to learn a velocity field that moves samples from a simple distribution (like a Gaussian) to a complex data distribution (like LiDAR scans).
+
+The loss function for our network is simple. Draw a real scan $x_1 \sim p_{\mathrm{data}}$, a noise sample $x_0 \sim \mathcal{N}(0,I)$, and a time $t \sim \mathcal{U}[0,1]$. Place a point on the straight line between them, $x_t = (1-t)\,x_0 + t\,x_1$, and ask the network to predict the direction of that line:
+
+$$\mathcal{L}(\theta)
+    = \mathbb{E}_{t,\;x_0,\;x_1}\,
+      \big\|\,v_\theta(t,x_t) - (x_1 - x_0)\,\big\|^2.$$
+
+That is the whole training procedure: a plain regression onto $x_1 - x_0$. There is no noise schedule, no posterior to derive, and no variational bound. To generate a new scan, we draw $x_0 \sim \mathcal{N}(0,I)$ and integrate $\frac{dx}{dt} = v_\theta(t,x)$ from $t=0$ to $t=1$ with any ODE solver, for example a handful of Euler steps $x \leftarrow x + \Delta t\, v_\theta(t,x)$.
+
+It is worth being clear about what the rest of this section is and is not. The network never sees a continuity equation, a marginal density $p_t$, or a posterior over scans. It only ever sees pairs $(x_t, x_1 - x_0)$ and fits them with squared error. Everything that follows (the continuity equation, conditional and marginal paths, the averaged velocity field) is a theory of *what that regression ends up learning*. It tells us that the best possible answer to this loss is a velocity field that provably carries noise to data, and it explains behaviors we see in practice, such as curved sampling trajectories and why a network generalizes to scans it has never seen. But the model discovers its field directly from data. 
+
+Note that we use the flow matching convention here: $x_0$ is noise and $x_1$ is data, with time running from noise at $t=0$ to data at $t=1$. This is the reverse of the diffusion convention above.
+
+
 ### The continuity equation
 
 Diffusion describes how a density spreads when particles move randomly. Flow matching instead moves particles deterministically: every particle at position $x$ at time $t$ moves with a prescribed velocity,
@@ -1077,7 +1091,7 @@ A particle at $x$ asks which scans it could be heading to and how likely each on
 
 ![The marginal field for a toy dataset of eight points (stars). Arrows show $\mathbb{E}[x_1\mid x_t=x]-x$, where a particle at $x$ expects to end up. Early on every scan is about equally likely, so the field points toward the middle of the dataset. As $t\to 1$ the posterior sharpens, the field splits into one basin per scan, and every particle lands on a training point.](figs/flow_matching/marginal_field.gif)
 
-#### Proof that the averaged field works
+<!-- #### Proof that the averaged field works
 
 Differentiate Eq. (11) in time, substitute Eq. (10) for each scan, and pull the divergence out of the integral (it acts on $x$, not on $x_1$):
 
@@ -1092,7 +1106,7 @@ $$\begin{aligned}
     &= -\nabla\cdot\big(p_t(x)\,u_t(x)\big),
 \end{aligned}$$
 
-where the last step is Eq. (12) multiplied through by $p_t(x)$. The marginal path satisfies the continuity equation with the averaged field. Integrating $\frac{dx}{dt} = u_t(x)$ from a noise sample therefore lands on a sample from $p_{\mathrm{data}}$.
+where the last step is Eq. (12) multiplied through by $p_t(x)$. The marginal path satisfies the continuity equation with the averaged field. Integrating $\frac{dx}{dt} = u_t(x)$ from a noise sample therefore lands on a sample from $p_{\mathrm{data}}$. -->
 
 #### Why the trajectories bend
 
