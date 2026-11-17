@@ -280,7 +280,7 @@ p_\theta(x_{t-1}\mid x_t)
 q(x_{t-1}\mid x_t).
 $$
 
-In the standard DDPM formulation, each learned reverse transition is modeled as a Gaussian:
+In the standard DDPM (Denoising Diffusion Probabilistic Models) formulation, each learned reverse transition is modeled as a Gaussian:
 
 $$
 p_\theta(x_{t-1}\mid x_t)
@@ -624,7 +624,7 @@ C
 }
 $$
 
-Thus, **minimizing the KL divergence between two Gaussians with fixed covariance matrices is equivalent to minimizing a weighted squared error between their means**.
+Thus, minimizing the KL divergence between two Gaussians with fixed covariance matrices is equivalent to minimizing a weighted squared error between their means.
 
 The factor $1/(2\sigma_t^2)$ determines how strongly errors in the predicted mean are penalized. A narrow Gaussian assigns much lower probability to samples far from its mean, so mean-prediction errors produce a larger KL divergence.
 
@@ -887,7 +887,7 @@ $$\mathcal{L}(\theta)
 
 That is the whole training procedure: a plain regression onto $x_1 - x_0$. There is no noise schedule, no posterior to derive, and no variational bound. To generate a new scan, we draw $x_0 \sim \mathcal{N}(0,I)$ and integrate $\frac{dx}{dt} = v_\theta(t,x)$ from $t=0$ to $t=1$ with any ODE solver, for example a handful of Euler steps $x \leftarrow x + \Delta t\, v_\theta(t,x)$.
 
-It is worth being clear about what the rest of this section is and is not. The network never sees a continuity equation, a marginal density $p_t$, or a posterior over scans. It only ever sees pairs $(x_t, x_1 - x_0)$ and fits them with squared error. Everything that follows (the continuity equation, conditional and marginal paths, the averaged velocity field) is a theory of *what that regression ends up learning*. It tells us that the best possible answer to this loss is a velocity field that provably carries noise to data, and it explains behaviors we see in practice, such as curved sampling trajectories and why a network generalizes to scans it has never seen. But the model discovers its field directly from data. 
+It is worth being clear about what the rest of this section is and is not. The network never sees a continuity equation, a marginal density $p_t$, or a posterior over scans. It only ever sees pairs $(x_t, x_1 - x_0)$ and fits them with squared error. Everything that follows (the continuity equation, conditional and marginal paths, the averaged velocity field) is a theory of what that regression ends up learning. It tells us that the best possible answer to this loss is a velocity field that provably carries noise to data, and it explains behaviors we see in practice, such as curved sampling trajectories and why a network generalizes to scans it has never seen. But the model discovers its field directly from data. 
 
 Note that we use the flow matching convention here: $x_0$ is noise and $x_1$ is data, with time running from noise at $t=0$ to data at $t=1$. This is the reverse of the diffusion convention above.
 
@@ -1142,7 +1142,7 @@ First, it only reproduces the training set. As $t\to 1$ the conditional Gaussian
 
 Second, it is expensive. Each evaluation sums over the entire dataset, where every scan is a range image with tens of thousands of pixels, and it must be repeated at every integration step with the full dataset on hand.
 
-A neural network $v_\theta(t,x)$ fixes both. It compresses the field into a fixed set of weights with constant cost per step. And because it cannot reproduce the sharp switching of Eq. (14) near $t=1$, it learns a smoother field that lands between training scans. Those in-between points are new samples (https://arxiv.org/abs/2410.23594)[Gao, 2024].
+A neural network $v_\theta(t,x)$ fixes both. It compresses the field into a fixed set of weights with constant cost per step. And because it cannot reproduce the sharp switching of Eq. (14) near $t=1$, it learns a smoother field that lands between training scans. There are several theories as to why the model generalizes across the data distribution instead of memorizing the training data [Bertrand, 2025](https://arxiv.org/abs/2506.03719), [Gao, 2024](https://arxiv.org/abs/2410.23594).
 
 ![The same eight-point dataset and the same noise samples. Left: integrating the exact field (Eq. 14) puts every sample on a training point. Right: a small network trained with the flow matching loss below cannot reproduce the sharp switching near $t=1$, so most samples land on the ring between training points.](figs/flow_matching/exact_vs_learned.gif)
 
