@@ -828,7 +828,43 @@ Diffusion models provide an elegant solution to our original problem: we can gen
 
 The first is computational cost during generation. Although training allows us to sample any noise level directly using the closed-form forward process, generation requires repeatedly evaluating the neural network to move from noise back toward the data distribution. In the original DDPM formulation, this can require hundreds or thousands of sequential denoising steps. For high-dimensional data such as LiDAR range images, these repeated evaluations can make generation expensive.
 
+<details>
+<summary><strong>Why can't we simply increase $\beta_t$ and use fewer, larger steps?</strong></summary>
+
+ Recall our earlier explanation in "Why is the reverse transition assumed to be Gaussian?" The Gaussian approximation works well when each forward step adds only a small amount of noise. If we increase $\beta_t$, the reverse conditional can become more complicated or even multimodal, making it harder to approximate with a single Gaussian. Since our model assumes this reverse conditional is Gaussian, we therefore need many steps.
+
+</details>
+
 ![The same trained model, sampled with an evenly strided schedule. Quality is the energy distance to a real batch of the same size, averaged over five batches of 3000 samples; the band is what two real batches score against each other. Below roughly 30 steps the samples visibly fall apart, and past about 60 steps more steps buy nothing measurable — but every step is another forward pass through the network, for every sample.](figs/diffusion/sampling_cost.png)
+
+<details>
+<summary><strong>What is Energy Distance?</strong></summary>
+
+To quantify how much sample quality improves with additional reverse steps, we can use energy distance, a statistical measure of how different two distributions are. Unlike KL divergence, energy distance can be estimated directly from samples without knowing either distribution's probability density. It compares the distances between real and generated samples against the distances naturally observed within each distribution. A lower energy distance means the generated distribution more closely matches the real one.
+
+Let $X,X'$ be independent samples from the real data distribution $P$, and $Y,Y'$ independent samples from the generated distribution $Q$.
+
+The squared energy distance is defined as
+
+$$
+2\mathbb E[||X-Y||]
+-
+\mathbb E[||X-X'||]
+-
+\mathbb E[||Y-Y'||].
+$$
+
+The first term measures the average distance between real and generated samples. The remaining terms measure the natural variation within the real and generated distributions.
+
+Why subtract these terms? Even two samples from exactly the same distribution will generally differ. Energy distance accounts for this natural variation rather than treating every difference between samples as a modeling error.
+
+For distributions with finite first moments, $\mathcal E^2(P,Q)\geq 0$, with equality if and only if $P=Q$.
+
+In practice, we estimate the expectations by averaging pairwise Euclidean distances over finite batches of samples. This requires no probability density calculations, making energy distance useful for evaluating generative models.
+
+Because we only have finite samples, even two independently drawn batches of real data generally have a nonzero empirical energy distance. We can use these real-versus-real comparisons as a reference for the variation expected from sampling alone.
+
+</details>
 
 The second limitation is that we learn the transformation indirectly. Recall that our original goal was to find a transformation that takes samples from a simple Gaussian distribution and moves them into the structured region occupied by real LiDAR observations. However, rather than learning this transformation directly, diffusion models construct a stochastic process that destroys the data, then train a network to predict the noise introduced by that process. We use these noise predictions to reconstruct the reverse transitions that ultimately generate new samples.
 
