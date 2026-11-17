@@ -29,7 +29,7 @@ In other words, we want to generate new range images that are statistically indi
 
 One way to understand this problem is to consider the geometry of the data distribution. Although a LiDAR range image may contain thousands of values, those values are not independent. They are constrained by the geometry of the environment, the position and orientation of the sensor, and the physical characteristics of the measurement process.
 
-Consequently, realistic range images occupy only a small, highly structured region of the space of all possible range images. We can think of this region as a data manifold, $\mathcal{M} \subseteq \mathbb{R}^d$, on or near which real observations are concentrated. This is a common assumption in machine learning called the manifold hypothesis, a statistical exploration can be found in [Whiteley, 2026](https://arxiv.org/abs/2208.11665).
+Consequently, realistic range images occupy only a small, highly structured region of the space of all possible range images. We can think of this region as a data manifold, $\mathcal{M} \subseteq \mathbb{R}^d$, on or near which real observations are concentrated. This is a common assumption in machine learning called the manifold hypothesis, a statistical exploration can be found in [Whiteley, 2022](https://arxiv.org/abs/2208.11665).
 
 From this perspective, generating a realistic range image amounts to producing a point on or near this manifold. An arbitrary point in the ambient space is unlikely to represent a physically plausible observation, but a point in the region occupied by real data is much more likely to exhibit the structure we want.
 
@@ -137,8 +137,8 @@ $$q(x_t\mid x_{t-1})
         \sqrt{1-\beta_t}\,x_{t-1},
         \beta_t I
     \right).$$
-
-![Pure Brownian motion (a) keeps spreading, so its variance grows without bound (c, grey) and it never settles on $\mathcal{N}(0,I)$. Shrinking $x_{t-1}$ by $\sqrt{1-\beta_t}$ before adding $\sqrt{\beta_t}\,\epsilon_t$ (b) pulls the mass back in as fast as the noise spreads it out, so the variance converges to $1$ (c, red). Both start from the same three-mode stand-in for $p_{\mathrm{data}}$.](figs/diffusion/brownian_vs_vp.png)
+<!-- 
+![Pure Brownian motion (a) keeps spreading, so its variance grows without bound (c, grey) and it never settles on $\mathcal{N}(0,I)$. Shrinking $x_{t-1}$ by $\sqrt{1-\beta_t}$ before adding $\sqrt{\beta_t}\,\epsilon_t$ (b) pulls the mass back in as fast as the noise spreads it out, so the variance converges to $1$ (c, red). Both start from the same three-mode stand-in for $p_{\mathrm{data}}$.](figs/diffusion/brownian_vs_vp.png) -->
 
 To understand how these small steps accumulate, consider again the forward process in Eq. (1) above. Define
 
