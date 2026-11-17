@@ -1092,7 +1092,7 @@ First, it only reproduces the training set. As $t\to 1$ the conditional Gaussian
 
 Second, it is expensive. Each evaluation sums over the entire dataset, where every scan is a range image with tens of thousands of pixels, and it must be repeated at every integration step with the full dataset on hand.
 
-A neural network $v_\theta(t,x)$ fixes both. It compresses the field into a fixed set of weights with constant cost per step. And because it cannot reproduce the sharp switching of Eq. (14) near $t=1$, it learns a smoother field that lands between training scans. Those in-between points are new samples. [TODO: optionally cite work on why diffusion and flow models generalize rather than memorize, e.g. Kadkhodaie et al., ICLR 2024; verify before citing.]
+A neural network $v_\theta(t,x)$ fixes both. It compresses the field into a fixed set of weights with constant cost per step. And because it cannot reproduce the sharp switching of Eq. (14) near $t=1$, it learns a smoother field that lands between training scans. Those in-between points are new samples (https://arxiv.org/abs/2410.23594)[Gao, 2024].
 
 ![The same eight-point dataset and the same noise samples. Left: integrating the exact field (Eq. 14) puts every sample on a training point. Right: a small network trained with the flow matching loss below cannot reproduce the sharp switching near $t=1$, so most samples land on the ring between training points.](figs/flow_matching/exact_vs_learned.gif)
 
@@ -1188,17 +1188,13 @@ $$\tag{18}
             = \mathbb{E}_{t,\,x_0,\,x_1}\,
               \big\|\,v_\theta(t, x_t) - (x_1 - x_0)\,\big\|^2.$$
 
-There is no noise schedule, no score, and no $\beta_t$. The pointwise argument needs every $t$ to receive some weight but not equal weight, so $t$ may be drawn from any distribution covering $[0,1]$; this is why the U-shaped timestep sampler ([Lee, 2024](https://arxiv.org/abs/2405.20320)) used in our repository changes where training effort goes without changing the minimizer. In our codebase this objective is the `ConditionalFlowMatcher` from [`torchcfm`](https://github.com/atong01/conditional-flow-matching) ([Tong, 2023](https://arxiv.org/abs/2302.00482)) with `sigma=0`, which the repository's comment describes as "equivalent to 1-rectified flow if sigma is 0" (`train.py`). Setting `sigma>0` adds a small Gaussian spread around each straight path, and the repository also offers an optimal-transport pairing (`otcfm`) in place of random pairing of $x_0$ and $x_1$.
+There is no noise schedule, no score, and no $\beta_t$. The pointwise argument needs every $t$ to receive some weight but not equal weight, so $t$ may be drawn from any distribution covering $[0,1]$; this is why the U-shaped timestep sampler ([Lee, 2024](https://arxiv.org/abs/2405.20320)) used changes where training effort goes without changing the minimizer. The python library often used for this is the `ConditionalFlowMatcher` from [`torchcfm`](https://github.com/atong01/conditional-flow-matching) ([Tong, 2023](https://arxiv.org/abs/2302.00482)).
 
 ## Rectified flow
 
 #### Why does regressing on one straight line give a field that works?
 
 Many different $(x_0,x_1)$ pairs pass through the same point $(t,x)$ with different velocities. The minimizer of the squared loss is their average, $v^\star(t,x)=\mathbb E[x_1-x_0\mid x_t=x]$, and the flow defined by that conditional mean transports $\mathcal N(0,I)$ to $p_{\text{data}}$ exactly ([Lipman, 2023](https://arxiv.org/abs/2210.02747)).
-
-#### Connection to Part 5 (sampling)
-
-In the course we sampled a Gaussian by pushing standard normal draws through a map (Cholesky) and used the change-of-variables theorem to get the new density. A flow is that idea made continuous: the ODE defines an invertible map $x_0\mapsto x_1$, and the density transforms by the instantaneous change-of-variables formula $\tfrac{d}{dt}\log p_t(x_t) = -\nabla\!\cdot v_\theta(t,x_t)$. Our model never evaluates that divergence, but it is why the "noise in, data out" picture is a legitimate change of variables and not just a trick.
 
 ### Straightness is a numerical-analysis statement
 
