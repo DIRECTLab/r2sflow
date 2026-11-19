@@ -1,5 +1,5 @@
 ---
-title: "From Noise to Point Clouds: Flow Matching for LiDAR"
+title: "From Noise to Point Clouds: Diffusion and Flow Matching for LiDAR"
 author:
   - Isaac Peterson
   - Jacob Morrey
@@ -7,9 +7,9 @@ author:
 
 # The Motivation
 
-LiDAR sensors are a common tool for autonomous mobile robot navigation, but can have failure modes in certain environments. For example, the way the lasers interact with glass or other glossy surfaces can cause the issue of "ghost points" in the point cloud, or points that do not correspond to actual objects in the environment. This can be a problem for downstream tasks like mapping and localization, which rely on accurate sensor data. One way to address this is to use generative models to produce new LiDAR range images that are mapped to the distribution of simulated data, which doesn't have these issues by nature of the simiulation. This allows us to "fill in" missing or corrupted data, improving the quality of the point cloud and the performance of downstream tasks.
+LiDAR sensors are a common tool for autonomous mobile robot navigation, but can have failure modes in certain environments. For example, the way the lasers interact with glass or other glossy surfaces can cause the issue of "ghost points" in the point cloud, or points that do not correspond to actual objects in the environment. This can be a problem for downstream tasks like mapping and localization, which rely on accurate sensor data. One way to address this is to use generative models to produce new LiDAR range images that are mapped to the distribution of simulated data, which doesn't have these issues by nature of the simulation. This allows us to "fill in" missing or corrupted data, improving the quality of the point cloud and the performance of downstream tasks.
 
-This post is about two related generative models, diffusion and flow matching, and one application of it, LiDAR range images. We cover the math, then the specific model our lab uses, R2Flow ([Nakashima, 2025](https://arxiv.org/abs/2412.02241)), then what happened when we pointed it at a Unitree Go2 robot with LiDAR in simulation.
+This post is about two related generative models, diffusion and flow matching, and one application of them, LiDAR range images. We cover the math, then the specific model our lab uses, R2Flow ([Nakashima, 2025](https://arxiv.org/abs/2412.02241)), then what happened when we pointed it at a Unitree Go2 robot with LiDAR in simulation.
 
 # Building the Theory
 
@@ -27,7 +27,7 @@ In other words, we want to generate new range images that are statistically indi
 
 One way to understand this problem is to consider the geometry of the data distribution. Although a LiDAR range image may contain thousands of values, those values are not independent. They are constrained by the geometry of the environment, the position and orientation of the sensor, and the physical characteristics of the measurement process.
 
-Consequently, realistic range images occupy only a small, highly structured region of the space of all possible range images. We can think of this region as a data manifold, $\mathcal{M} \subseteq \mathbb{R}^d$, on or near which real observations are concentrated. This is a common assumption in machine learning called the manifold hypothesis, a statistical exploration can be found in [Whiteley, 2022](https://arxiv.org/abs/2208.11665).
+Consequently, realistic range images occupy only a small, highly structured region of the space of all possible range images. We can think of this region as a data manifold, $\mathcal{M} \subseteq \mathbb{R}^d$, on or near which real observations are concentrated. This is a common assumption in machine learning called the manifold hypothesis. A statistical exploration can be found in ([Whiteley, 2022](https://arxiv.org/abs/2208.11665)).
 
 From this perspective, generating a realistic range image amounts to producing a point on or near this manifold. An arbitrary point in the ambient space is unlikely to represent a physically plausible observation, but a point in the region occupied by real data is much more likely to exhibit the structure we want.
 
@@ -76,7 +76,7 @@ Diffusion models use two processes:
 
 2.  a reverse process, $p_\theta$, which reverses the forward process and takes a sample of Gaussian noise and moves it onto the data manifold.
 
-![The forward process moves a data sample $x_0$ off the manifold, and the reverse process walks a noise sample back onto it. Every panel is the bird's eye view of the point cloud decoded from $x_t$. The left leg is the forward noising of one real Go2-W scan; the right leg is the exact reverse posterior chain $q(x_{t-1}\mid x_t,x_0)$ aimed at a different real scan, which is the trajectory the learned $p_\theta$ has to imitate without ever being shown its target. Coming back down somewhere else on the manifold is what makes this a generative model.](figs/diffusion/diffusion_manifold.png)
+![The forward process moves a data sample $x_0$ off the manifold, and the reverse process walks a noise sample back onto it. Every panel is the bird's eye view of the point cloud decoded from $x_t$. The left leg is the forward noising of one real Go2 scan; the right leg is the exact reverse posterior chain $q(x_{t-1}\mid x_t,x_0)$ aimed at a different real scan, which is the trajectory the learned $p_\theta$ has to imitate without ever being shown its target. Coming back down somewhere else on the manifold is what makes this a generative model.](figs/diffusion/diffusion_manifold.png)
 
 ### Forward Process
 
@@ -116,7 +116,7 @@ This tells us that Brownian motion is equivalent to repeatedly adding small amou
 
 But remember, we want to transform our data to a standard Gaussian, $x_0$ to $x_T \sim \mathcal{N}(0,I)$. Pure Brownian motion does not converge to a standard Gaussian. Its variance grows without bound as $t \rightarrow \infty$. For our generative model, we instead want a process that gradually removes the original signal while introducing noise, eventually leaving a distribution close to $\mathcal{N}(0,I)$.
 
-We can accomplish this by first making it a discrete time process, $t \in \{0, ..., T\}$. Then modifying each step to both scale down the previous sample and add Gaussian noise:
+We can accomplish this by first making it a discrete time process, $t \in \{0, ..., T\}$, and then modifying each step to both scale down the previous sample and add Gaussian noise:
 
 $$\tag{1}
     x_t = \sqrt{1-\beta_t}\,x_{t-1}
@@ -206,7 +206,7 @@ $$x_T \approx \epsilon,
 
 Thus, the marginal distribution $q(x_T)$ approaches a standard Gaussian, completing our forward diffusion process.
 
-![Eq. (2) applied to a real scan: one Go2-W simulator sweep projected onto the sensor's $40\times512$ ray grid and encoded as log-scale depth in $[-1,1]$, which is what the models actually train on. Top: the range image $x_t$, with a single draw of $\epsilon$ held fixed across $t$ so the rows are comparable. Bottom: the same $x_t$ decoded back to a point cloud. The room is still legible at $t=25$ and survives faintly to $t=75$, long after the per-step noise looks destructive.](figs/diffusion/forward_lidar.png)
+![Eq. (2) applied to a real scan: one Go2 simulator sweep projected onto the sensor's $40\times512$ ray grid and encoded as log-scale depth in $[-1,1]$, which is what the models actually train on. Top: the range image $x_t$, with a single draw of $\epsilon$ held fixed across $t$ so the rows are comparable. Bottom: the same $x_t$ decoded back to a point cloud. The room is still legible at $t=25$ and survives faintly to $t=75$, long after the per-step noise looks destructive.](figs/diffusion/forward_lidar.png)
 
 ### Reverse Process
 
@@ -711,7 +711,7 @@ $$
 x_t=\sqrt{\bar\alpha_t}x_0+\sqrt{1-\bar\alpha_t}\epsilon.
 $$
 
-This is the simplified noise-prediction objective used in the original DDPM paper (Ho et al., 2020). The word *simplified* refers to removing the timestep-dependent weighting that arises from the original likelihood-based objective. Specifically, the Gaussian KL divergence produces a weighted noise-prediction error,
+This is the simplified noise-prediction objective used in the original DDPM paper ([Ho, 2020](https://arxiv.org/abs/2006.11239)). The word *simplified* refers to removing the timestep-dependent weighting that arises from the original likelihood-based objective. Specifically, the Gaussian KL divergence produces a weighted noise-prediction error,
 
 $$
 w_t|\epsilon-\epsilon_\theta(x_t,t)|^2+C,
@@ -721,7 +721,7 @@ w_t=
 {2\sigma_t^2\alpha_t(1-\bar\alpha_t)}.
 $$
 
-The simplified objective sets $w_t=1$ for every timestep, giving each noise level equal weight in expectation when timesteps are sampled uniformly. Ho et al. found that this reweighting improves sample quality in their experiments, even though it no longer corresponds exactly to the original likelihood-based objective.
+The simplified objective sets $w_t=1$ for every timestep, giving each noise level equal weight in expectation when timesteps are sampled uniformly. The DDPM authors found that this reweighting improves sample quality in their experiments ([Ho, 2020](https://arxiv.org/abs/2006.11239)), even though it no longer corresponds exactly to the original likelihood-based objective.
 
 <details>
 <summary><strong>Where the timestep weighting comes from, and why dropping it helps</strong></summary>
@@ -777,7 +777,7 @@ With the linear schedule used here and $\sigma_t^2=\beta_t$, the weight $w_t$ ru
 The full objective is also more awkward to work with than the weighted sum above suggests.
 
 - **The $t=1$ term is degenerate.** Since $\tilde\beta_1=0$, the posterior at the last step is a point mass and the KL against a Gaussian is not finite. DDPM handles $\mathcal{L}_0$ with a separate discrete decoder that integrates a Gaussian density over the bin width of each pixel, which is an entirely different computation from the other $T-1$ terms.
-- **It gives a noisy gradient.** We cannot afford all $T$ terms per update, so we sample one $t$ and rescale. Because the $w_t$ span two orders of magnitude, that estimator has high variance. Nichol and Dhariwal (2021) found the full bound "quite difficult to optimize in practice" for exactly this reason, and had to add importance sampling over $t$, with $p_t\propto\sqrt{\mathbb{E}[\mathcal{L}_t^2]}$ estimated from a running history of past loss values, to make it behave.
+- **It gives a noisy gradient.** We cannot afford all $T$ terms per update, so we sample one $t$ and rescale. Because the $w_t$ span two orders of magnitude, that estimator has high variance. Nichol and Dhariwal ([Nichol, 2021](https://arxiv.org/abs/2102.09672)) found the full bound "quite difficult to optimize in practice" for exactly this reason, and had to add importance sampling over $t$, with $p_t\propto\sqrt{\mathbb{E}[\mathcal{L}_t^2]}$ estimated from a running history of past loss values, to make it behave.
 - **It couples to the variance.** The terms dropped into $C$ above are constant only because $\sigma_t^2$ is fixed. If you want to *learn* the reverse variances, those terms come back, and the objective has to be rebalanced — Nichol and Dhariwal use $\mathcal{L}_{\mathrm{hybrid}}=\mathcal{L}_{\mathrm{simple}}+\lambda\mathcal{L}_{\mathrm{vlb}}$ with $\lambda=0.001$ and a stop-gradient on $\mu_\theta$, so that the bound shapes only the variance.
 
 Per optimizer step the cost is nearly identical — both objectives need exactly one forward pass of $\epsilon_\theta$. What the simplified loss buys is the removal of all of the above: no special-cased final step, no variance bookkeeping, no importance sampling, and a gradient estimator that is well behaved under a plain uniform draw of $t$.
@@ -827,10 +827,9 @@ Diffusion models provide an elegant solution to our original problem: we can gen
 The first is computational cost during generation. Although training allows us to sample any noise level directly using the closed-form forward process, generation requires repeatedly evaluating the neural network to move from noise back toward the data distribution. In the original DDPM formulation, this can require hundreds or thousands of sequential denoising steps. For high-dimensional data such as LiDAR range images, these repeated evaluations can make generation expensive.
 
 <details>
-<summary><strong>Why can't we simply increase $\beta_t$ and use fewer, larger steps?</strong></summary>
+<summary><strong>Why can't we simply increase $$\beta_t$$ and use fewer, larger steps?</strong></summary>
 
- Recall our earlier explanation in "Why is the reverse transition assumed to be Gaussian?" The Gaussian approximation works well when each forward step adds only a small amount of noise. If we increase $\beta_t$, the reverse conditional can become more complicated or even multimodal, making it harder to approximate with a single Gaussian. Since our model assumes this reverse conditional is Gaussian, we therefore need many steps.
-
+Recall our earlier explanation in "Why is the reverse transition assumed to be Gaussian?" The Gaussian approximation works well when each forward step adds only a small amount of noise. If we increase $\beta_t$, the reverse conditional can become more complicated or even multimodal, making it harder to approximate with a single Gaussian. Since our model assumes this reverse conditional is Gaussian, we therefore need many steps.
 </details>
 
 ![The same trained model, sampled with an evenly strided schedule. Quality is the energy distance to a real batch of the same size, averaged over five batches of 3000 samples; the band is what two real batches score against each other. Below roughly 30 steps the samples visibly fall apart, and past about 60 steps more steps buy nothing measurable — but every step is another forward pass through the network, for every sample.](figs/diffusion/sampling_cost.png)
@@ -866,7 +865,9 @@ Because we only have finite samples, even two independently drawn batches of rea
 
 The second limitation is that we learn the transformation indirectly. Recall that our original goal was to find a transformation that takes samples from a simple Gaussian distribution and moves them into the structured region occupied by real LiDAR observations. However, rather than learning this transformation directly, diffusion models construct a stochastic process that destroys the data, then train a network to predict the noise introduced by that process. We use these noise predictions to reconstruct the reverse transitions that ultimately generate new samples.
 
-This raises an interesting question: what if we could learn how to move samples from the Gaussian distribution to the data distribution directly, without first defining a stochastic noising process and learning to reverse it?
+## Flow matching
+
+The diffusion generation process raises an interesting question: what if we could learn how to move samples from the Gaussian distribution to the data distribution directly, without first defining a stochastic noising process and learning to reverse it?
 
 Instead of repeatedly removing random noise, imagine assigning a velocity to every point in our high-dimensional space. A sample beginning in the Gaussian distribution could then follow this velocity field along a continuous trajectory toward the data distribution.
 
@@ -874,9 +875,15 @@ This is the central idea behind flow matching ([Lipman, 2023](https://arxiv.org/
 
 As we will see, this gives us a more direct way to formulate the generative problem, and it also opens the door to designing transport paths that can be integrated efficiently during generation.
 
-## Flow matching
+---
+$$\boxed{\textbf{Important: From here on we switch to the naming convention used in the flow matching literature}}$$
+
+$x_0 \sim \mathcal{N}(0,I)$ is noise and $x_1 \sim p_{\mathrm{data}}$ is data, and time runs from noise at $t=0$ to data at $t=1$. This is the reverse of the diffusion convention above.
+
+---
 
 ### The Spoiler
+
 For us it was helpful to understand the end goal of flow matching before diving into the theory that makes it work. The idea is to learn a velocity field that moves samples from a simple distribution (like a Gaussian) to a complex data distribution (like LiDAR scans).
 
 The loss function for our network is simple. Draw a real scan $x_1 \sim p_{\mathrm{data}}$, a noise sample $x_0 \sim \mathcal{N}(0,I)$, and a time $t \sim \mathcal{U}[0,1]$. Place a point on the straight line between them, $x_t = (1-t)\,x_0 + t\,x_1$, and ask the network to predict the direction of that line:
@@ -888,9 +895,6 @@ $$\mathcal{L}(\theta)
 That is the whole training procedure: a plain regression onto $x_1 - x_0$. There is no noise schedule, no posterior to derive, and no variational bound. To generate a new scan, we draw $x_0 \sim \mathcal{N}(0,I)$ and integrate $\frac{dx}{dt} = v_\theta(t,x)$ from $t=0$ to $t=1$ with any ODE solver; for example a handful of Euler steps $x \leftarrow x + \Delta t\, v_\theta(t,x)$.
 
 It is worth being clear about what the rest of this section is and is not. The network never sees a continuity equation, a marginal density $p_t$, or a posterior over scans. It only ever sees pairs $(x_t, x_1 - x_0)$ and fits them with squared error. Everything that follows (the continuity equation, conditional and marginal paths, the averaged velocity field) is a theory of what that regression ends up learning. It tells us that the best possible answer to this loss is a velocity field that provably carries noise to data, and it explains behaviors we see in practice, such as curved sampling trajectories and why a network generalizes to scans it has never seen. But the model discovers its field directly from data. 
-
-Note that we use the flow matching convention here: $x_0$ is noise and $x_1$ is data, with time running from noise at $t=0$ to data at $t=1$. This is the reverse of the diffusion convention above.
-
 
 ### The continuity equation
 
@@ -932,10 +936,12 @@ $$\frac{dN}{dt} = \int_a^b \frac{\partial \rho}{\partial t}\,dx.$$
 These two integrals agree for every stretch of road, which is only possible if the integrands are equal everywhere:
 
 $$\tag{3}
-    \frac{\partial \rho}{\partial t}
-    = -\frac{\partial}{\partial x}\big(\rho\,v\big).$$
+    -\frac{\partial \rho}{\partial t}
+    = \frac{\partial}{\partial x}\big(\rho\,v\big).$$
 
-Read it as "the rate at which a spot gets more crowded equals minus the net rate at which cars leave it". The derivative $\partial_x(\rho v)$ is the net outflow: over a tiny stretch $[x, x+\Delta x]$, cars leave at rate $\rho v(x+\Delta x)$ and arrive at rate $\rho v(x)$, and their difference per unit length tends to $\partial_x(\rho v)$.
+
+Read it as "the rate at which a spot gets less crowded is equal to the net rate at which cars 
+leave it". The derivative $\partial_x(\rho v)$ is the net outflow: over a tiny stretch $[x, x+\Delta x]$, cars leave at rate $\rho v(x+\Delta x)$ and arrive at rate $\rho v(x)$, and their difference per unit length tends to $\partial_x(\rho v)$.
 
 #### Constant speed: the jam slides
 
@@ -1018,7 +1024,7 @@ We cannot write one down directly. We have no formula for $p_{\mathrm{data}}$, o
 
 Moving a Gaussian onto a single scan, however, is easy. So we solve that small problem for every scan in the dataset and then combine the answers.
 
-From here on we switch to the naming convention used in the flow matching literature: $x_0 \sim \mathcal{N}(0,I)$ is noise and $x_1 \sim p_{\mathrm{data}}$ is data, and time runs from noise at $t=0$ to data at $t=1$. This is the reverse of the diffusion convention above.
+
 
 #### One scan: a straight line
 
@@ -1142,7 +1148,7 @@ First, it only reproduces the training set. As $t\to 1$ the conditional Gaussian
 
 Second, it is expensive. Each evaluation sums over the entire dataset, where every scan is a range image with tens of thousands of pixels, and it must be repeated at every integration step with the full dataset on hand.
 
-A neural network $v_\theta(t,x)$ fixes both. It compresses the field into a fixed set of weights with constant cost per step. And because it cannot reproduce the sharp switching of Eq. (14) near $t=1$, it learns a smoother field that lands between training scans. There are several theories as to why the model generalizes across the data distribution instead of memorizing the training data [Bertrand, 2025](https://arxiv.org/abs/2506.03719), [Gao, 2024](https://arxiv.org/abs/2410.23594).
+A neural network $v_\theta(t,x)$ fixes both. It compresses the field into a fixed set of weights with constant cost per step. And because it cannot reproduce the sharp switching of Eq. (14) near $t=1$, it learns a smoother field that lands between training scans. There are several theories as to why the model generalizes across the data distribution instead of memorizing the training data ([Bertrand, 2025](https://arxiv.org/abs/2506.03719); [Gao, 2024](https://arxiv.org/abs/2410.23594)).
 
 ![The same eight-point dataset and the same noise samples. Left: integrating the exact field (Eq. 14) puts every sample on a training point. Right: a small network trained with the flow matching loss below cannot reproduce the sharp switching near $t=1$, so most samples land on the ring between training points.](figs/flow_matching/exact_vs_learned.gif)
 
@@ -1181,7 +1187,7 @@ $$\nabla_v\,\mathbb{E}\big[\|v - Y\|^2 \,\big|\, x_t = x\big]
     \quad\Longrightarrow\quad
     v^\star = \mathbb{E}[Y\mid x_t = x] = u_t(x).$$
 
-This is the result from our derivation of the best linear predictor: under squared error, the best predictor of $Y$ given $X$ is $\mathbb{E}[Y\mid X]$. There we restricted the predictor to be linear; a neural network lifts that restriction. The full loss averages this pointwise loss over all $t$ and $x$, and a sufficiently flexible network can choose its output at each $(t,x)$ independently, so the global minimizer is $v_\theta(t,x) = u_t(x)$ everywhere.
+The best predictor of $Y$ given $X$ is $\mathbb{E}[Y\mid X]$. There we restricted the predictor to be linear; a neural network lifts that restriction. The full loss averages this pointwise loss over all $t$ and $x$, and a sufficiently flexible network can choose its output at each $(t,x)$ independently, so the global minimizer is $v_\theta(t,x) = u_t(x)$ everywhere.
 
 #### The two losses differ by a constant
 
@@ -1207,7 +1213,7 @@ $$\tag{17}
     \Big].
     }$$
 
-Since $C$ does not depend on $\theta$, the two losses have identical gradients. Every gradient step on the loss we can compute is exactly a gradient step on the loss we cannot. The vanishing cross term is the bias--variance split; in Hilbert-space language, it says the conditional expectation is an orthogonal projection, so the error $Y - m$ is orthogonal to anything that depends only on $x$.
+Since $C$ does not depend on $\theta$, the two losses have identical gradients. Every gradient step on the loss we can compute is exactly a gradient step on the loss we cannot. The vanishing cross term is the bias-variance split; in Hilbert-space language, it says the conditional expectation is an orthogonal projection, so the error $Y - m$ is orthogonal to anything that depends only on $x$.
 
 #### Back to the highway
 
@@ -1238,17 +1244,17 @@ $$\tag{18}
             = \mathbb{E}_{t,\,x_0,\,x_1}\,
               \big\|\,v_\theta(t, x_t) - (x_1 - x_0)\,\big\|^2.$$
 
-There is no noise schedule, no score, and no $\beta_t$. The pointwise argument needs every $t$ to receive some weight but not equal weight, so $t$ may be drawn from any distribution covering $[0,1]$; this is why the U-shaped timestep sampler ([Lee, 2024](https://arxiv.org/abs/2405.20320)) used changes where training effort goes without changing the minimizer. The python library often used for this is the `ConditionalFlowMatcher` from [`torchcfm`](https://github.com/atong01/conditional-flow-matching) ([Tong, 2023](https://arxiv.org/abs/2302.00482)).
+There is no noise schedule, no score, and no $\beta_t$. The pointwise argument needs every $t$ to receive some weight but not equal weight, so $t$ may be drawn from any distribution covering $[0,1]$; this is why the U-shaped timestep sampler ([Lee, 2024](https://arxiv.org/abs/2405.20320)) used by R2Flow changes where training effort goes without changing the minimizer.
 
 ## Rectified flow
 
-#### Why does regressing on one straight line give a field that works?
+### Why does regressing on one straight line give a field that works?
 
 Many different $(x_0,x_1)$ pairs pass through the same point $(t,x)$ with different velocities. The minimizer of the squared loss is their average, $v^\star(t,x)=\mathbb E[x_1-x_0\mid x_t=x]$, and the flow defined by that conditional mean transports $\mathcal N(0,I)$ to $p_{\text{data}}$ exactly ([Lipman, 2023](https://arxiv.org/abs/2210.02747)).
 
 ### Straightness is a numerical-analysis statement
 
-If the learned trajectories were perfectly straight, one Euler step would be exact: $x_1 = x_0 + v_\theta(0,x_0)$. They are not straight, because the conditional-mean field averages over crossing paths, so the true trajectories curve. Euler's global error scales with step size times curvature, so more curvature means more steps for the same accuracy. This is the same trade the reference posts on numerical stability are about (Gundersen on conditioning, Cook on two-pass vs. one-pass variance): the same quantity computed two ways, and the cheap way costs you digits in a regime you can predict.
+If the learned trajectories were perfectly straight, one Euler step would be exact: $x_1 = x_0 + v_\theta(0,x_0)$. They are not straight, because the conditional-mean field averages over crossing paths, so the true trajectories curve. Euler's global error scales with step size times curvature, so more curvature means more steps for the same accuracy.
 
 Reflow is the fix. Train a first model (1-RF). Use it to generate $(x_0, x_1)$ pairs by running the ODE, where $x_1$ is now generated from the specific $x_0$. Retrain on those coupled pairs (2-RF). Because each $x_1$ is a deterministic function of its $x_0$, the straight-line targets no longer cross, so the new field is straighter and fewer steps suffice. Optionally distill further to 1–4 steps ($k$-TD).
 
@@ -1258,7 +1264,7 @@ Reflow is the fix. Train a first model (1-RF). Use it to generate $(x_0, x_1)$ p
 
 # LiDAR as an image
 
-Most Diffusion and Flow matching models are used for image generation, so the common trick is to turn a scan into one. A spinning LiDAR sweeps azimuth and elevation, so each return at range $r$, azimuth $\phi$, elevation $\theta$ is placed in pixel $(\text{row}(\theta),\text{col}(\phi))$ with value $r$. That gives a range image of shape $H\times W$, where $H$ is the number of beams.
+Most diffusion and flow matching models are used for image generation, so the common trick is to turn a scan into one. A spinning LiDAR sweeps azimuth and elevation, so each return at range $r$, azimuth $\phi$, elevation $\theta$ is placed in pixel $(\text{row}(\theta),\text{col}(\phi))$ with value $r$. That gives a range image of shape $H\times W$, where $H$ is the number of beams.
 
 Details that matter, taken from the repo's `LiDARUtility` and data docs:
 
@@ -1282,10 +1288,12 @@ The repo's three-stage recipe:
 | 2-RF   | start from 1-RF, reflow          | 1M $(x_0,x_1)$ pairs from 1-RF using `dopri5` |
 | $k$-TD | start from 2-RF, $k\in\{1,2,4\}$ | 100k pairs from 2-RF                          |
 
-![Samples from R2Flow while it fine-tunes on our simulated Go2-W navigation scans ($64\times1024$), starting from the KITTI-360 1-RF weights. Each panel is the bird's eye view of one generated scan, sampled from the EMA model with `dopri5`. The frames show every logged sample, one per 1k optimizer steps from 1k to 50k (8k to 400k training images at batch size 8). At 1k steps the scans are still blurry blobs with no clear walls; over training they settle into the walls and corridors of the simulated building.](figs/lidar_r2flow/r2flow_samples.gif)
+![Samples from R2Flow while it fine-tunes on our simulated Go2 navigation scans ($64\times1024$), starting from the KITTI-360 1-RF weights. Each panel is the bird's eye view of one generated scan, sampled from the EMA model with `dopri5`. The frames show every logged sample, one per 1k optimizer steps from 1k to 50k (8k to 400k training images at batch size 8). At 1k steps the scans are still blurry blobs with no clear walls; over training they settle into the walls and corridors of the simulated building.](figs/lidar_r2flow/r2flow_samples.gif)
 
 # The Application
 
-This research was inspired by DRUM ([Miyawaki, 2026](https://arxiv.org/abs/2603.26263)), which uses diffusion techniques to generate semantically labeled, realisitc LiDAR scans, which they used to train a downstream semantic LiDAR classifier. Our idea was to see if we could reverse the process, train a model that could take real, noisy LiDAR scans and map them to the clean simulated LiDAR distribution. The GIF above shows that the R2Flow model ([Nakashima, 2025](https://arxiv.org/abs/2412.02241)) can be fine-tuned to generate simulated LiDAR scans from our Isaacsim environment, next steps will be figuring out how to map the real scans to the simulated distribution, and then use those generated scans to train a downstream model for semantic segmentation. 
+This research was inspired by DRUM ([Miyawaki, 2026](https://arxiv.org/abs/2603.26263)), which uses diffusion techniques to generate semantically labeled, realistic LiDAR scans, which they used to train a downstream semantic LiDAR classifier. Our idea was to see if we could reverse the process, train a model that could take real, noisy LiDAR scans and map them to the clean simulated LiDAR distribution. The GIF above shows that the R2Flow model ([Nakashima, 2025](https://arxiv.org/abs/2412.02241)) can be fine-tuned to generate simulated LiDAR scans from our Isaac Sim environment, next steps will be figuring out how to map the real scans to the simulated distribution, and then use those generated scans to train a downstream model for semantic segmentation. 
+
+# Code
 
 The code for generating the figures and GIF is available in the [diffusion](https://github.com/DIRECTLab/r2sflow/blob/main/notebooks/diffusion.ipynb) and [flow matching](https://github.com/DIRECTLab/r2sflow/blob/main/notebooks/flow_matching.ipynb) notebooks.
