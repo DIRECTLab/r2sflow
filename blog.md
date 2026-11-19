@@ -7,9 +7,9 @@ author:
 
 # The Motivation
 
-LiDAR sensors are a common tool for autonomous mobile robots, but they are prone to failure in certain evnironments, for example the way the lasers interact with glass or othre glossy surfaces can cause the issue of "ghost points" in the point cloud. This can be a problem for downstream tasks like mapping and localization, which rely on accurate sensor data. One way to address this is to use generative models to produce new LiDAR range images that are mapped to the distribution of simulated data, which doesn't have these issues by nature of the simiulation. This allows us to "fill in" missing or corrupted data, improving the quality of the point cloud and the performance of downstream tasks.
+LiDAR sensors are a common tool for autonomous mobile robot navigation, but can have failure modes in certain environments. For example, the way the lasers interact with glass or other glossy surfaces can cause the issue of "ghost points" in the point cloud, or points that do not correspond to actual objects in the environment. This can be a problem for downstream tasks like mapping and localization, which rely on accurate sensor data. One way to address this is to use generative models to produce new LiDAR range images that are mapped to the distribution of simulated data, which doesn't have these issues by nature of the simiulation. This allows us to "fill in" missing or corrupted data, improving the quality of the point cloud and the performance of downstream tasks.
 
-This post is about one family of generative models, diffusion and flow matching, and one application of it, LiDAR range images. We cover the math, then the specific model our lab uses, R2Flow ([Nakashima, 2025](https://arxiv.org/abs/2412.02241)), then what happened when we pointed it at a Unitree Go2 robot with LiDAR in simulation.
+This post is about two related generative models, diffusion and flow matching, and one application of it, LiDAR range images. We cover the math, then the specific model our lab uses, R2Flow ([Nakashima, 2025](https://arxiv.org/abs/2412.02241)), then what happened when we pointed it at a Unitree Go2 robot with LiDAR in simulation.
 
 # Building the Theory
 
@@ -82,7 +82,7 @@ Diffusion models use two processes:
 
 Start with a data sample $x_0 \sim p_{\mathrm{data}}$, where $x_0$ is a real range image gathered from our LiDAR sensor. We want to gradually transform $x_0$ into a sample from a simple distribution, ideally a standard Gaussian $\mathcal{N}(0,I)$.
 
-To construct such a process, let's look to physics, specifically Brownian motion. Brownian motion describes the random movement of particles suspended in a gas or liquid due to collisions with surrounding molecules. When a group of particles is initially concentrated in one region, this random motion causes their probability distribution to spread out over time, a phenomenon known as diffusion.
+To construct such a process we can utilize Brownian motion. Brownian motion describes the random movement of particles suspended in a gas or liquid due to collisions with surrounding molecules. When a group of particles is initially concentrated in one region, this random motion causes their probability distribution to spread out over time, a phenomenon known as diffusion.
 
 If $p(x,t)$ represents the probability density of finding a particle at position $x$ at time $t$, then under ideal Brownian motion, the distribution evolves according to the diffusion equation:
 
@@ -885,7 +885,7 @@ $$\mathcal{L}(\theta)
     = \mathbb{E}_{t,\;x_0,\;x_1}\,
       \big\|\,v_\theta(t,x_t) - (x_1 - x_0)\,\big\|^2.$$
 
-That is the whole training procedure: a plain regression onto $x_1 - x_0$. There is no noise schedule, no posterior to derive, and no variational bound. To generate a new scan, we draw $x_0 \sim \mathcal{N}(0,I)$ and integrate $\frac{dx}{dt} = v_\theta(t,x)$ from $t=0$ to $t=1$ with any ODE solver, for example a handful of Euler steps $x \leftarrow x + \Delta t\, v_\theta(t,x)$.
+That is the whole training procedure: a plain regression onto $x_1 - x_0$. There is no noise schedule, no posterior to derive, and no variational bound. To generate a new scan, we draw $x_0 \sim \mathcal{N}(0,I)$ and integrate $\frac{dx}{dt} = v_\theta(t,x)$ from $t=0$ to $t=1$ with any ODE solver; for example a handful of Euler steps $x \leftarrow x + \Delta t\, v_\theta(t,x)$.
 
 It is worth being clear about what the rest of this section is and is not. The network never sees a continuity equation, a marginal density $p_t$, or a posterior over scans. It only ever sees pairs $(x_t, x_1 - x_0)$ and fits them with squared error. Everything that follows (the continuity equation, conditional and marginal paths, the averaged velocity field) is a theory of what that regression ends up learning. It tells us that the best possible answer to this loss is a velocity field that provably carries noise to data, and it explains behaviors we see in practice, such as curved sampling trajectories and why a network generalizes to scans it has never seen. But the model discovers its field directly from data. 
 
@@ -935,7 +935,7 @@ $$\tag{3}
     \frac{\partial \rho}{\partial t}
     = -\frac{\partial}{\partial x}\big(\rho\,v\big).$$
 
-Read it as: the rate at which a spot gets more crowded equals minus the net rate at which cars leave it. The derivative $\partial_x(\rho v)$ is the net outflow: over a tiny stretch $[x, x+\Delta x]$, cars leave at rate $\rho v(x+\Delta x)$ and arrive at rate $\rho v(x)$, and their difference per unit length tends to $\partial_x(\rho v)$.
+Read it as "the rate at which a spot gets more crowded equals minus the net rate at which cars leave it". The derivative $\partial_x(\rho v)$ is the net outflow: over a tiny stretch $[x, x+\Delta x]$, cars leave at rate $\rho v(x+\Delta x)$ and arrive at rate $\rho v(x)$, and their difference per unit length tends to $\partial_x(\rho v)$.
 
 #### Constant speed: the jam slides
 
@@ -1001,7 +1001,7 @@ Divide the car density by the total number of cars and $\rho/100$ becomes a prob
 $$\tag{6}
     \boxed{
     \frac{\partial p_t(x)}{\partial t}
-    = -\nabla\cdot\big(p_t(x)\,v(t,x)\big)
+    = -\nabla\cdot\big(p_t(x)\,v(t,x)\big).
     }$$
 
 This is the equation every generative flow has to satisfy. A velocity field transports noise into data exactly when its continuity equation carries $p_0 = \mathcal{N}(0,I)$ to $p_1 = p_{\mathrm{data}}$. A single flow-matching training pair moves along a straight line at constant velocity $x_1 - x_0$, which is our sliding jam. The difference is that different particles get different velocities, so the field varies in space, the stretching term turns on, and the cloud changes shape instead of just sliding. The next section shows how to build such a field.
@@ -1258,7 +1258,7 @@ Reflow is the fix. Train a first model (1-RF). Use it to generate $(x_0, x_1)$ p
 
 # LiDAR as an image
 
-Diffusion and flow models are most developed for images, so the common trick is to turn a scan into one. A spinning LiDAR sweeps azimuth and elevation, so each return at range $r$, azimuth $\phi$, elevation $\theta$ is placed in pixel $(\text{row}(\theta),\text{col}(\phi))$ with value $r$. That gives a range image of shape $H\times W$, where $H$ is the number of beams.
+Most Diffusion and Flow matching models are used for image generation, so the common trick is to turn a scan into one. A spinning LiDAR sweeps azimuth and elevation, so each return at range $r$, azimuth $\phi$, elevation $\theta$ is placed in pixel $(\text{row}(\theta),\text{col}(\phi))$ with value $r$. That gives a range image of shape $H\times W$, where $H$ is the number of beams.
 
 Details that matter, taken from the repo's `LiDARUtility` and data docs:
 
@@ -1288,3 +1288,4 @@ The repo's three-stage recipe:
 
 This research was inspired by DRUM ([Miyawaki, 2026](https://arxiv.org/abs/2603.26263)), which uses diffusion techniques to generate semantically labeled, realisitc LiDAR scans, which they used to train a downstream semantic LiDAR classifier. Our idea was to see if we could reverse the process, train a model that could take real, noisy LiDAR scans and map them to the clean simulated LiDAR distribution. The GIF above shows that the R2Flow model ([Nakashima, 2025](https://arxiv.org/abs/2412.02241)) can be fine-tuned to generate simulated LiDAR scans from our Isaacsim environment, next steps will be figuring out how to map the real scans to the simulated distribution, and then use those generated scans to train a downstream model for semantic segmentation. 
 
+The code for generating the figures and GIF is available in the [diffusion](https://github.com/DIRECTLab/r2sflow/blob/main/notebooks/diffusion.ipynb) and [flow matching](https://github.com/DIRECTLab/r2sflow/blob/main/notebooks/flow_matching.ipynb) notebooks.
