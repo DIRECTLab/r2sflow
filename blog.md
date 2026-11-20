@@ -873,8 +873,6 @@ Instead of repeatedly removing random noise, imagine assigning a velocity to eve
 
 This is the central idea behind flow matching ([Lipman, 2023](https://arxiv.org/abs/2210.02747)). Rather than training a network to predict noise, we train it to predict a velocity field that transports one probability distribution into another.
 
-As we will see, this gives us a more direct way to formulate the generative problem, and it also opens the door to designing transport paths that can be integrated efficiently during generation.
-
 ---
 $$\boxed{\textbf{Important: From here on we switch to the naming convention used in the flow matching literature}}$$
 
@@ -884,7 +882,7 @@ $x_0 \sim \mathcal{N}(0,I)$ is noise and $x_1 \sim p_{\mathrm{data}}$ is data, a
 
 ### The Spoiler
 
-For us it was helpful to understand the end goal of flow matching before diving into the theory that makes it work. The idea is to learn a velocity field that moves samples from a simple distribution (like a Gaussian) to a complex data distribution (like LiDAR scans).
+For us it was helpful to understand the end goal of flow matching before diving into the theory that makes it work. The idea is to learn a velocity field that moves samples from a distribution (like a Gaussian) to a complex data distribution (like LiDAR scans).
 
 The loss function for our network is simple. Draw a real scan $x_1 \sim p_{\mathrm{data}}$, a noise sample $x_0 \sim \mathcal{N}(0,I)$, and a time $t \sim \mathcal{U}[0,1]$. Place a point on the straight line between them, $x_t = (1-t)\,x_0 + t\,x_1$, and ask the network to predict the direction of that line:
 
@@ -894,7 +892,7 @@ $$\mathcal{L}(\theta)
 
 That is the whole training procedure: a plain regression onto $x_1 - x_0$. There is no noise schedule, no posterior to derive, and no variational bound. To generate a new scan, we draw $x_0 \sim \mathcal{N}(0,I)$ and integrate $\frac{dx}{dt} = v_\theta(t,x)$ from $t=0$ to $t=1$ with any ODE solver; for example a handful of Euler steps $x \leftarrow x + \Delta t\, v_\theta(t,x)$.
 
-It is worth being clear about what the rest of this section is and is not. The network never sees a continuity equation, a marginal density $p_t$, or a posterior over scans. It only ever sees pairs $(x_t, x_1 - x_0)$ and fits them with squared error. Everything that follows (the continuity equation, conditional and marginal paths, the averaged velocity field) is a theory of what that regression ends up learning. It tells us that the best possible answer to this loss is a velocity field that provably carries noise to data, and it explains behaviors we see in practice, such as curved sampling trajectories and why a network generalizes to scans it has never seen. But the model discovers its field directly from data. 
+It is worth being clear about what the rest of this section is and is not. The network never sees a continuity equation, a marginal density $p_t$, or a posterior over scans. It only ever sees pairs $(x_t, x_1 - x_0)$ and fits them with squared error. Everything that follows (the continuity equation, conditional and marginal paths, the averaged velocity field) is a theory of what that regression ends up learning. It tells us that the best possible answer to this loss is a velocity field that provably carries noise to data, and it explains behaviors we see in practice, such as curved sampling trajectories and why a network generalizes to scans it has never seen.
 
 ### The continuity equation
 
@@ -902,7 +900,7 @@ Diffusion describes how a density spreads when particles move randomly. Flow mat
 
 $$\frac{dx}{dt} = v(t,x).$$
 
-The velocity field $v$ assigns an arrow to every point in space, and any particle sitting at that point follows the arrow. Before we can ask which velocity field turns noise into LiDAR scans, we need to know how a velocity field changes a density. The answer is the continuity equation, and the easiest way to build it is with traffic.
+The velocity field $v$ assigns an arrow to every point in space, and any particle sitting at that point follows the arrow. Before we can ask which velocity field turns noise into LiDAR scans, we need to know how a velocity field changes a density. The answer is the continuity equation, and an easy example to understand how it works is traffic flow.
 
 #### Cars on a road
 
@@ -927,9 +925,9 @@ Cars are never created or destroyed, so $N$ can only change by cars driving in a
 $$\frac{dN}{dt}
     = \underbrace{\rho v\big|_{a}}_{\text{in}}
     - \underbrace{\rho v\big|_{b}}_{\text{out}}
-    = -\int_a^b \frac{\partial (\rho v)}{\partial x}\,dx,$$
+    = -\int_a^b \frac{\partial (\rho v)}{\partial x}\,dx.$$
 
-where the last step is the fundamental theorem of calculus. But we can also differentiate $N(t)$ directly, since the stretch $[a,b]$ does not move:
+But we can also differentiate $N(t)$ directly, since the stretch $[a,b]$ does not move:
 
 $$\frac{dN}{dt} = \int_a^b \frac{\partial \rho}{\partial t}\,dx.$$
 
@@ -1116,7 +1114,7 @@ where the last step is Eq. (12) multiplied through by $p_t(x)$. The marginal pat
 
 #### Why the trajectories bend
 
-Take a one-dimensional "dataset" of two points, $x_1 = -1$ and $x_1 = +1$, each with probability $\tfrac12$. A particle at $x = 0$ is equally likely to be heading to either one; their velocities $\frac{-1}{1-t}$ and $\frac{+1}{1-t}$ cancel, and it does not move. A particle slightly to the right of $0$ has a posterior tilted toward $+1$, so its averaged velocity points right. As $t$ grows the conditional Gaussians narrow, the posterior becomes more decisive, and the particle commits harder. Every conditional path is a straight line, yet the averaged trajectories hesitate early and then curve toward the nearer target. This curvature, born from averaging straight lines that cross, is what the reflow procedure in the [Rectified flow](#rectified-flow) section removes.
+Take a one-dimensional "dataset" of two points, $x_1 = -1$ and $x_1 = +1$, each with probability $\tfrac12$. A particle at $x = 0$ is equally likely to be heading to either one; their velocities $\frac{-1}{1-t}$ and $\frac{+1}{1-t}$ cancel, and it does not move. A particle slightly to the right of $0$ has a posterior tilted toward $+1$, so its averaged velocity points right. As $t$ grows the conditional Gaussians narrow, the posterior becomes more decisive, and the particle commits harder. Every conditional path is a straight line, yet the averaged trajectories hesitate early and then curve toward the nearer target. This curvature, born from averaging straight lines that cross, is what the reflow procedure in the [rectified flow](#rectified-flow) section removes.
 
 ![The two-point example. Left: straight conditional paths from random noise samples to randomly chosen targets $\pm 1$. They cross. Right: trajectories of the averaged field $u_t$ from the same starting points, over a background of $u_t(x)$ (red is upward, blue is downward). They hesitate near $x=0$, commit, and bend toward the nearer target without crossing.](figs/flow_matching/two_point.gif)
 
@@ -1144,7 +1142,7 @@ $$\tag{14}
 
 The weights are a softmax over how close $x$ is to each scan's path. There are two problems with integrating this field directly.
 
-First, it only reproduces the training set. As $t\to 1$ the conditional Gaussians shrink to zero width, the weights collapse onto a single scan, and the particle is pulled exactly onto it. In the two-point example, every particle ends at exactly $-1$ or $+1$; nothing ever lands in between. The exact field is an expensive nearest-neighbor lookup, which is the opposite of our goal of generating scans without reproducing the training data.
+First, it only reproduces the training set. As $t\to 1$ the conditional Gaussians shrink to zero width, the weights collapse onto a single scan, and the particle is pulled exactly onto it. In the two-point example, every particle ends at exactly $-1$ or $+1$; nothing ever lands in between.
 
 Second, it is expensive. Each evaluation sums over the entire dataset, where every scan is a range image with tens of thousands of pixels, and it must be repeated at every integration step with the full dataset on hand.
 
@@ -1256,7 +1254,7 @@ Many different $(x_0,x_1)$ pairs pass through the same point $(t,x)$ with differ
 
 If the learned trajectories were perfectly straight, one Euler step would be exact: $x_1 = x_0 + v_\theta(0,x_0)$. They are not straight, because the conditional-mean field averages over crossing paths, so the true trajectories curve. Euler's global error scales with step size times curvature, so more curvature means more steps for the same accuracy.
 
-Reflow is the fix. Train a first model (1-RF). Use it to generate $(x_0, x_1)$ pairs by running the ODE, where $x_1$ is now generated from the specific $x_0$. Retrain on those coupled pairs (2-RF). Because each $x_1$ is a deterministic function of its $x_0$, the straight-line targets no longer cross, so the new field is straighter and fewer steps suffice. Optionally distill further to 1–4 steps ($k$-TD).
+Reflow is the fix. Train a first model (1-RF). Use it to generate $(x_0, x_1)$ pairs by running the ODE, where $x_1$ is now generated from the specific $x_0$. Retrain on those coupled pairs (2-RF). Because each $x_1$ is a deterministic function of its $x_0$, the straight-line targets no longer cross, so the new field is straighter and fewer steps suffice.
 
 ![Reflow on a toy problem, from a Gaussian to two moons. Both models start from the same noise. 1-RF, trained on random pairs, follows curved paths. 2-RF, retrained on 1-RF's own $(x_0, x_1)$ pairs, follows nearly straight ones. $S$ is the mean squared deviation of the velocity from the straight-line displacement.](figs/flow_matching/reflow.gif)
 
@@ -1266,13 +1264,13 @@ Reflow is the fix. Train a first model (1-RF). Use it to generate $(x_0, x_1)$ p
 
 Most diffusion and flow matching models are used for image generation, so the common trick is to turn a scan into one. A spinning LiDAR sweeps azimuth and elevation, so each return at range $r$, azimuth $\phi$, elevation $\theta$ is placed in pixel $(\text{row}(\theta),\text{col}(\phi))$ with value $r$. That gives a range image of shape $H\times W$, where $H$ is the number of beams.
 
-Details that matter, taken from the repo's `LiDARUtility` and data docs:
+Specific implementation details from the r2flow repository:
 
 -   Channels. Depth, optionally reflectance. Missing returns ("raydrop") are encoded as an out-of-range value; after log-scale encoding an empty pixel is exactly $-1$.
 
 -   Depth normalization. The pretrained KITTI-360 model uses a log scale, $\log(r+1)/\log(r_{\max}+1)$, over a $[1.45, 80]$ m window, so near range gets more resolution than far range.
 
--   Round trip. Range image to point cloud is just the inverse spherical projection using the known ray angles, so nothing is lost beyond quantization to the grid.
+-   Round trip. Converting a range image back to a point cloud is the inverse spherical projection using each pixel's known beam elevation and azimuth. The only losses come from the forward projection: angles snap to the pixel grid, returns that share a pixel collide, and ranges outside the depth window are clipped.
 
 The network is an HDiT (hierarchical diffusion transformer with neighborhood attention, about 80.9M parameters per the repo's table), with a learnable positional embedding tied to the token grid.
 
