@@ -918,6 +918,7 @@ Instead of repeatedly removing random noise, imagine assigning a velocity to eve
 This is the central idea behind flow matching ([Lipman, 2023](https://arxiv.org/abs/2210.02747)). Rather than training a network to predict noise, we train it to predict a velocity field that transports one probability distribution into another.
 
 ---
+
 $$\boxed{\textbf{Important: From here on we switch to the naming convention used in the flow matching literature}}$$
 
 $x_0 \sim \mathcal{N}(0,I)$ is noise and $x_1 \sim p_{\mathrm{data}}$ is data, and time runs from noise at $t=0$ to data at $t=1$. This is the reverse of the diffusion convention above.
