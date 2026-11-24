@@ -40,7 +40,7 @@ Our goal is to generate new LiDAR range images that capture the geometric and st
 
 #### Formalizing the Goal
 
-Suppose we have a dataset of LiDAR range images sampled from an unknown data distribution \(p_{\mathrm{data}}(x)\). Each image arranges one scan into an \(H \times W\) grid. The \(H\) rows correspond to LiDAR beams at different elevation angles, and the \(W\) columns divide the horizontal sweep into azimuth bins. Each pixel stores the distance from the sensor to a return in that direction, or a special value if there is no return. We display this grid as a heat map and represent the same values in the math as a flattened vector \(x \in \mathbb{R}^{d}\), where \(d = HW\). We want to construct a generative model, parameterized by $\theta$, that produces new samples from a learned distribution $p_\theta(x)$ such that
+Suppose we have a dataset of LiDAR range images sampled from an unknown data distribution $p_{\mathrm{data}}(x)$. Each image arranges one scan into an $H \times W$ grid. The $H$ rows correspond to LiDAR beams at different elevation angles, and the $W$ columns divide the horizontal sweep into azimuth bins. Each pixel stores the distance from the sensor to a return in that direction, or a special value if there is no return. We display this grid as a heat map and represent the same values in the math as a flattened vector $x \in \mathbb{R}^{d}$, where $d = H\times W$. We want to construct a generative model, parameterized by $\theta$, that produces new samples from a learned distribution $p_\theta(x)$ such that
 
 $$p_\theta(x) \approx p_{\mathrm{data}}(x).$$
 
