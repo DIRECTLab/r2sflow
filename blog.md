@@ -1330,7 +1330,7 @@ The repo's three-stage recipe:
 | 2-RF   | start from 1-RF, reflow          | 1M $(x_0,x_1)$ pairs from 1-RF using `dopri5` |
 | $k$-TD | start from 2-RF, $k\in\{1,2,4\}$ | 100k pairs from 2-RF                          |
 
-![Samples from R2Flow while it fine-tunes on our simulated Go2 navigation scans ($64\times1024$), starting from the KITTI-360 1-RF weights. Each panel is the bird's eye view of one generated scan, sampled from the EMA model with `dopri5`. The frames show every logged sample, one per 1k optimizer steps from 1k to 50k (8k to 400k training images at batch size 8). At 1k steps the scans are still blurry blobs with no clear walls; over training they settle into the walls and corridors of the simulated building.](figs/lidar_r2flow/r2flow_samples.gif)
+![Samples that started from a model trained on real car lidar scans, that we fine-tuned for simulated go2 lidar. The final model can take any gaussian noise and map it to the simulated LiDAR distribution.](figs/lidar_r2flow/r2flow_samples.gif)
 
 # The Application
 
