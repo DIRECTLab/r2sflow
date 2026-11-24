@@ -11,13 +11,36 @@ LiDAR sensors are a common tool for autonomous mobile robot navigation, but can 
 
 This post is about two related generative models, diffusion and flow matching, and one application of them, LiDAR range images. We cover the math, then the specific model our lab uses, R2Flow ([Nakashima, 2025](https://arxiv.org/abs/2412.02241)), then what happened when we pointed it at a Unitree Go2 robot with LiDAR in simulation.
 
+<details>
+<summary><strong>Probability Notation Primer</strong></summary>
+
+We use the following probability notation throughout the article. You can refer back to this table as you read.
+
+| Notation | Meaning |
+|---|---|
+| $x \sim p$ | $x$ is drawn from the distribution $p$. |
+| $p(x \mid s)$ | Conditional density of a LiDAR scan $x$ given a scene and sensor pose $s$. |
+| $p(x,s)$ | Joint density of the scan $x$ and the scene and sensor pose $s$. |
+| $p(s)$ | Density of scene geometry and sensor pose, taken together. |
+| $p_{\mathrm{data}}(x)$ | Marginal density of real LiDAR scans, obtained by averaging $p(x \mid s)$ over $s$ with weights $p(s)$. |
+| $p_{\mathrm{prior}}$, $p_\theta$ | The starting distribution we sample from and the model distribution with learned parameters $\theta$, respectively. |
+| $q$ | Distribution induced by the diffusion noising process. This includes conditionals such as $q(x_t \mid x_0)$. |
+| $p_t(x)$ | Density of $x$ at time $t$ along the flow. |
+| $\mathcal{N}(0,R)$ | Gaussian distribution with mean zero and covariance $R$. The standard Gaussian is $\mathcal{N}(0,I)$, where $I$ is the identity matrix. |
+| $\mathcal{N}(x;h(s),R)$ | Gaussian density evaluated at $x$, with mean $h(s)$ and covariance $R$. |
+| $\mathcal{U}[0,1]$, $\mathcal{U}\{1,\ldots,T\}$ | Uniform distributions over the interval $[0,1]$ and the integers $1$ through $T$, respectively. |
+| $\mathbb{E}_{x\sim p}[f(x)]$ | Average value of $f(x)$ when $x$ is drawn from $p$. A condition inside the brackets, as in $\mathbb{E}[Y \mid X]$, means the average is taken given $X$. |
+| $D_{\mathrm{KL}}(q \Vert p_\theta)$ | Kullback–Leibler divergence from $q$ to $p_\theta$, the average of $\log q(x)-\log p_\theta(x)$ under $q$. |
+
+</details>
+
 # Building the Theory
 
 Our goal is to generate new LiDAR range images that capture the geometric and statistical properties of real sensor observations. We will build up the theoretical background for this problem, starting with diffusion models and using them to motivate flow matching and rectified flow.
 
 #### Formalizing the Goal
 
-Suppose we have a dataset of LiDAR range images sampled from some unknown data distribution $p_{\mathrm{data}}(x)$, where $x \in \mathbb{R}^d$ represents a range image with $d$ values. We want to construct a generative model, parameterized by $\theta$, that produces new samples from a learned distribution $p_\theta(x)$ such that
+Suppose we have a dataset of LiDAR range images sampled from an unknown data distribution \(p_{\mathrm{data}}(x)\). Each image arranges one scan into an \(H \times W\) grid. The \(H\) rows correspond to LiDAR beams at different elevation angles, and the \(W\) columns divide the horizontal sweep into azimuth bins. Each pixel stores the distance from the sensor to a return in that direction, or a special value if there is no return. We display this grid as a heat map and represent the same values in the math as a flattened vector \(x \in \mathbb{R}^{d}\), where \(d = HW\). We want to construct a generative model, parameterized by $\theta$, that produces new samples from a learned distribution $p_\theta(x)$ such that
 
 $$p_\theta(x) \approx p_{\mathrm{data}}(x).$$
 
@@ -51,6 +74,8 @@ However, our goal is not to generate noisy measurements of a particular known en
 
 $$p_{\mathrm{data}}(x)
     = \int p(x \mid s)\,p(s)\,ds.$$
+
+where $p(s)$ represents the joint probability density of scene geometry and LiDAR sensor pose.
 
 Unlike the conditional measurement distribution, this marginal distribution is much more difficult to characterize. The space of possible environments is enormous, and the resulting distribution of LiDAR observations is highly structured and potentially multimodal. Even if we could accurately model the measurement noise, we would still need to describe the distribution of possible scenes and integrate over them.
 
@@ -827,7 +852,7 @@ Diffusion models provide an elegant solution to our original problem: we can gen
 The first is computational cost during generation. Although training allows us to sample any noise level directly using the closed-form forward process, generation requires repeatedly evaluating the neural network to move from noise back toward the data distribution. In the original DDPM formulation, this can require hundreds or thousands of sequential denoising steps. For high-dimensional data such as LiDAR range images, these repeated evaluations can make generation expensive.
 
 <details>
-<summary><strong>Why can't we simply increase $$\beta_t$$ and use fewer, larger steps?</strong></summary>
+<summary><strong>Why can't we simply increase $\beta_t$ and use fewer, larger steps?</strong></summary>
 
 Recall our earlier explanation in "Why is the reverse transition assumed to be Gaussian?" The Gaussian approximation works well when each forward step adds only a small amount of noise. If we increase $\beta_t$, the reverse conditional can become more complicated or even multimodal, making it harder to approximate with a single Gaussian. Since our model assumes this reverse conditional is Gaussian, we therefore need many steps.
 </details>
