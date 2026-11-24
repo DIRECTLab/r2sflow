@@ -426,6 +426,25 @@ q(x_t\mid x_0)
 }.
 $$
 
+<details>
+<summary><strong>Why do we condition on the original scan?</strong></summary>
+
+During training, we know the original scan $x_0$ because we drew it from the dataset. Conditioning on it lets us compute the reverse posterior from the known forward process. Without $x_0$, we would have to average over original scans using the unknown data distribution. Bayes' rule with an additional condition $c$ is
+
+$$
+q(a\mid b,c)
+=
+\frac{q(b\mid a,c)\,q(a\mid c)}{q(b\mid c)}.
+$$
+
+Here, $a=x_{t-1}$, $b=x_t$, and $c=x_0$. The forward process is Markovian, so once $x_{t-1}$ is given, the original scan provides no additional information about $x_t$. This simplifies the likelihood in the numerator:
+
+$$
+q(x_t\mid x_{t-1},x_0) = q(x_t\mid x_{t-1}).
+$$
+
+</details>
+
 Recall that we already know all three distributions on the right-hand side:
 
 $$
