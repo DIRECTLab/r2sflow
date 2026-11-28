@@ -94,6 +94,60 @@ class IndexedSamples(torch.utils.data.Dataset):
         return f"#data: {len(self.files):,}"
 
 
+class PairedScans(torch.utils.data.Dataset):
+    """(pseudo-real, sim) range-image pairs written by tools/make_pseudoreal.py.
+
+    `pair_dir/frames.json` lists one entry per pair; each `.npz` holds metric
+    depth images `depth_sim` (target) and `depth_pr` (condition), (1, H, W).
+    Several pairs share a sim frame when more than one seed was generated.
+    """
+
+    def __init__(self, pair_dir, split: str = "train"):
+        import json
+
+        self.pair_dir = Path(pair_dir)
+        frames = json.loads((self.pair_dir / "frames.json").read_text())
+        self.items = [f for f in frames if f["split"] == split]
+        if not self.items:
+            raise ValueError(f"no {split!r} pairs in {self.pair_dir}")
+
+    def __len__(self):
+        return len(self.items)
+
+    def __getitem__(self, idx):
+        import numpy as np
+
+        item = self.items[idx]
+        data = np.load(self.pair_dir / item["file_name"])
+        return {
+            "sample_id": item["sim_sample_id"],
+            "depth": torch.from_numpy(data["depth_sim"].astype("float32")),
+            "cond_depth": torch.from_numpy(data["depth_pr"].astype("float32")),
+        }
+
+    def __repr__(self):
+        return f"PairedScans({self.pair_dir}, {len(self)} pairs)"
+
+
+def augment_azimuth(*images: torch.Tensor, generator=None) -> list[torch.Tensor]:
+    """Random azimuth roll + horizontal flip, identical for every image.
+
+    Valid for any 360 deg spherical range image: a roll is a yaw of the sensor
+    and a flip mirrors the scene, both of which leave the elevation rows intact.
+    """
+    B, _, _, W = images[0].shape
+    device = images[0].device
+    shift = torch.randint(0, W, (B,), generator=generator).to(device)
+    flip = (torch.rand(B, generator=generator) < 0.5).to(device)
+    cols = (torch.arange(W, device=device)[None] - shift[:, None]) % W  # (B, W)
+    cols = torch.where(flip[:, None], cols.flip(1), cols)
+    out = []
+    for img in images:
+        index = cols[:, None, None, :].expand(-1, img.shape[1], img.shape[2], -1)
+        out.append(torch.gather(img, 3, index))
+    return out
+
+
 def restore_x_0(seeds, shape, device):
     zs = []
     for seed in seeds.cpu().tolist():
@@ -131,7 +185,8 @@ def load_pretrained_weights(
     `source` is a checkpoint path or a release name (e.g. "r2flow-kitti360-1rf").
     Only the tokenizer conv and the detokenizer linear depend on the number of
     image channels; they keep the checkpoint channels in `channel_index` (e.g.
-    [0] to keep depth from a depth+reflectance model). The `coords` buffer is
+    [0] to keep depth from a depth+reflectance model). Extra tokenizer input
+    channels (a conditional model's `cond_channels`) are zero-initialised. The `coords` buffer is
     skipped since the caller sets the target sensor's ray angles. Any other
     mismatch raises instead of silently loading a partial model.
     """
@@ -162,6 +217,11 @@ def load_pretrained_weights(
             continue
         if key == "tokenizer.0.weight":  # (D, C, P1, P2)
             value = value[:, channel_index]
+            extra = dst[key].shape[1] - value.shape[1]
+            if extra > 0:
+                # Conditioning channels (model.cond_channels) start at zero, so the
+                # conditional model is initially exactly the pretrained one.
+                value = torch.cat([value, value.new_zeros(value.shape[0], extra, *value.shape[2:])], dim=1)
         elif key == "detokenizer.1.weight":  # (P1 * P2 * C, D), laid out (P1 P2 C)
             value = value.view(num_patch, -1, value.shape[-1])[:, channel_index]
             value = value.reshape(-1, value.shape[-1])

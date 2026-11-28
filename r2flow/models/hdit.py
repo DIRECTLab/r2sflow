@@ -519,11 +519,14 @@ class HDiT(nn.Module):
             None,
         ] = "learnable_embedding",
         ring: bool = True,
+        cond_channels: int = 0,
     ):
         super().__init__()
         self.resolution = _pair(resolution)
         self.in_channels = in_channels
         self.out_channels = out_channels if out_channels else in_channels
+        # Conditioning image channels concatenated to x before tokenization.
+        self.cond_channels = cond_channels
         self.patch_size = _pair(patch_size)
         self.depths = depths
 
@@ -561,7 +564,7 @@ class HDiT(nn.Module):
         )
 
         self.tokenizer = Tokenizer(
-            in_channels=in_channels,
+            in_channels=in_channels + cond_channels,
             out_channels=base_channels,
             patch_size=patch_size,
         )
@@ -632,8 +635,22 @@ class HDiT(nn.Module):
         return F.avg_pool2d(coords, kernel_size=kernel_size, stride=kernel_size)
 
     def forward(
-        self, t: torch.Tensor, x: torch.Tensor, *args, **kwargs
+        self,
+        t: torch.Tensor,
+        x: torch.Tensor,
+        *args,
+        cond: torch.Tensor | None = None,
+        **kwargs,
     ) -> torch.Tensor:
+        if self.cond_channels > 0:
+            if cond is None or cond.shape[1] != self.cond_channels:
+                raise ValueError(
+                    f"model expects a {self.cond_channels}-channel `cond`, got "
+                    f"{None if cond is None else tuple(cond.shape)}"
+                )
+            x = torch.cat([x, cond.to(x)], dim=1)
+        elif cond is not None:
+            raise ValueError("unconditional model was given `cond`")
         if len(t.shape) == 0:
             t = t[None].repeat_interleave(x.shape[0], dim=0)
         emb = self.timestep_pe(t.to(x))

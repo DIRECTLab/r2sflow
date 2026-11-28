@@ -40,6 +40,7 @@ def main(cfg: r2flow.utils.option.DefaultConfig):
     # =================================================================================
 
     is_finetuning = cfg.finetuning.init_ckpt is not None
+    is_conditional = cfg.model.cond_channels > 0
     assert not (
         is_finetuning and cfg.finetuning.init_weights is not None
     ), "init_ckpt (reflow) and init_weights (1-RF from pretrained) are exclusive"
@@ -141,9 +142,13 @@ def main(cfg: r2flow.utils.option.DefaultConfig):
                 dilation=(1, 1, 1, 1),
                 positional_embedding=cfg.model.coords_encoding,
                 ring=True,
+                cond_channels=cfg.model.cond_channels,
             )
         else:
             raise ValueError(f"Unknown: {cfg.model.architecture}")
+        assert not is_conditional or cfg.model.architecture == "nat_hdit", (
+            "cond_channels is implemented for HDiT only"
+        )
 
         if cfg.finetuning.init_weights is not None:
             # Before model.coords and the EMA copy, so both start from these weights
@@ -245,13 +250,20 @@ def main(cfg: r2flow.utils.option.DefaultConfig):
         dataset = r2flow.utils.training.IndexedSamples(
             sample_dir=cfg.finetuning.sample_dir,
         )
+    elif cfg.data.dataset == "go2w_pseudoreal":
+        assert is_conditional, "go2w_pseudoreal pairs train a conditional model"
+        assert cfg.data.data_dir is not None, "--data_dir <pair dir> is required"
+        dataset = r2flow.utils.training.PairedScans(cfg.data.data_dir, split="train")
     else:
+        assert not is_conditional, f"{cfg.data.dataset} has no condition images"
+        extra = {} if cfg.data.data_dir is None else {"data_dir": cfg.data.data_dir}
         dataset = ds.load_dataset(
             path=f"r2flow/data/{cfg.data.dataset}",
             name=cfg.data.projection,
             split=ds.Split.TRAIN,
             num_proc=cfg.training.num_workers,
             trust_remote_code=True,
+            **extra,
         ).with_format("torch")
 
     if accelerator.is_main_process:
@@ -281,15 +293,17 @@ def main(cfg: r2flow.utils.option.DefaultConfig):
     # Utilities
     # =================================================================================
 
-    def preprocess(batch):
+    def preprocess(batch, depth_key: str = "depth"):
         x = []
         if cfg.data.data_format == "cartesian":
+            assert depth_key == "depth", "conditioning supports range formats only"
             mask = lidar_utils.get_mask(batch["depth"])
             x += [batch["xyz"] / lidar_utils.max_depth * mask]
         else:
-            x += [lidar_utils.convert_metric_depth(batch["depth"])]
+            x += [lidar_utils.convert_metric_depth(batch[depth_key].to(device))]
         if cfg.data.train_reflectance:
-            x += [lidar_utils.normalize(batch["reflectance"])]
+            assert depth_key == "depth", "conditioning supports depth-only models"
+            x += [lidar_utils.normalize(batch["reflectance"].to(device))]
         x = torch.cat(x, dim=1)
         x = F.interpolate(x.to(device), size=cfg.data.resolution, mode="nearest-exact")
         return x
@@ -343,6 +357,13 @@ def main(cfg: r2flow.utils.option.DefaultConfig):
     # Sampling
     # =================================================================================
 
+    val_cond = None  # conditional: a fixed batch of condition images for logging
+
+    def ema_velocity(t, x):
+        if val_cond is None:
+            return ema.ema_model(t, x)
+        return ema.ema_model(t, x, cond=val_cond)
+
     ode_kwargs = dict(
         y0=torch.randn(
             cfg.training.batch_size // accelerator.num_processes,
@@ -375,12 +396,23 @@ def main(cfg: r2flow.utils.option.DefaultConfig):
             # Training
             # =================================================================================
 
+            cond = None
             if is_finetuning:
                 x_1 = preprocess(batch[1])
                 x_0 = r2flow.utils.training.restore_x_0(batch[0], x_1.shape[1:], device)
             else:
                 x_1 = preprocess(batch)
-                x_0 = torch.randn_like(x_1)
+                if is_conditional:
+                    cond = preprocess(batch, depth_key="cond_depth")
+                if cfg.training.augment:
+                    if cond is None:
+                        (x_1,) = r2flow.utils.training.augment_azimuth(x_1)
+                    else:
+                        x_1, cond = r2flow.utils.training.augment_azimuth(x_1, cond)
+                if is_conditional and cfg.flow.source == "bridge":
+                    x_0 = cond + cfg.flow.bridge_sigma * torch.randn_like(cond)
+                else:
+                    x_0 = torch.randn_like(x_1)
 
             t, x_t, u_t = sync(
                 fm.sample_location_and_conditional_flow,
@@ -390,7 +422,7 @@ def main(cfg: r2flow.utils.option.DefaultConfig):
             )
 
             with accelerator.accumulate(model):
-                v_t = model(t=t, x=x_t)
+                v_t = model(t=t, x=x_t) if cond is None else model(t=t, x=x_t, cond=cond)
                 loss = loss_fn(v_t, u_t)
                 accelerator.backward(loss)
                 if accelerator.sync_gradients:
@@ -415,11 +447,17 @@ def main(cfg: r2flow.utils.option.DefaultConfig):
 
                 if global_step == 1:
                     log_images(x_1, "dataset", num_images)
+                    if cond is not None:
+                        n_val = ode_kwargs["y0"].shape[0]
+                        val_cond = cond[:n_val].detach().clone()
+                        log_images(val_cond, "condition", num_images)
+                        if cfg.flow.source == "bridge":
+                            ode_kwargs["y0"] = val_cond + cfg.flow.bridge_sigma * torch.randn_like(val_cond)
 
                 if global_step % cfg.training.num_steps_logging == 0:
                     ema.ema_model.nfe = 0
                     with torch.no_grad():
-                        x_1_ = torchdiffeq.odeint(func=ema.ema_model, **ode_kwargs)[-1]
+                        x_1_ = torchdiffeq.odeint(func=ema_velocity, **ode_kwargs)[-1]
                     log["validation/nfe"] = ema.ema_model.nfe
                     log_images(x_1_, "sample", num_images)
 

@@ -22,6 +22,7 @@ Run in the light bag venv (numpy + rosbags), not the torch container:
 from __future__ import annotations
 
 import argparse
+import collections
 import sys
 from pathlib import Path
 
@@ -35,32 +36,42 @@ from lidar_grid import RayGrid
 
 
 def accumulate_sweeps(
-    bag: Path, topic: str, per_scan: int, typestore: str, limit: int | None
+    bag: Path, topic: str, per_scan: int, typestore: str, limit: int | None,
+    stride: int | None = None,
 ):
-    """Group consecutive messages into sweeps of `per_scan` messages each."""
-    buf_xyz, buf_ref, buf_time, buf_stamp = [], [], [], []
+    """Group consecutive messages into sweeps of `per_scan` messages each.
+
+    With `stride < per_scan` the windows overlap (a sliding window advancing
+    `stride` messages at a time), which multiplies the number of sweeps from a
+    short bag at the cost of correlation between neighbours.
+    """
+    stride = per_scan if stride is None else stride
+    if not 1 <= stride <= per_scan:
+        raise ValueError(f"stride must be in [1, {per_scan}], got {stride}")
+    buf = collections.deque(maxlen=per_scan)
+    since_emit = 0
     emitted = 0
     for stamp, points in bag_io.iter_pointclouds([bag], topic, typestore):
         xyz, intensity = bag_io.as_xyzi(points)
         if len(xyz) == 0:
             continue
-        buf_xyz.append(xyz)
-        buf_ref.append(intensity)
         sweep_time = bag_io.field_or_none(points, "time")
-        buf_time.append(
+        sweep_time = (
             sweep_time[: len(xyz)] if sweep_time is not None else np.zeros(len(xyz))
         )
-        buf_stamp.append(stamp)
-        if len(buf_xyz) < per_scan:
+        buf.append((xyz, intensity, sweep_time, stamp))
+        since_emit += 1
+        if len(buf) < per_scan or (emitted > 0 and since_emit < stride):
             continue
+        stamps = [b[3] for b in buf]
         yield (
-            np.concatenate(buf_xyz),
-            np.concatenate(buf_ref),
-            np.concatenate(buf_time),
-            float(np.median(buf_stamp)),
-            float(buf_stamp[-1] - buf_stamp[0]),
+            np.concatenate([b[0] for b in buf]),
+            np.concatenate([b[1] for b in buf]),
+            np.concatenate([b[2] for b in buf]),
+            float(np.median(stamps)),
+            float(stamps[-1] - stamps[0]),
         )
-        buf_xyz, buf_ref, buf_time, buf_stamp = [], [], [], []
+        since_emit = 0
         emitted += 1
         if limit is not None and emitted >= limit:
             return
@@ -120,7 +131,8 @@ def convert(args) -> None:
     frames, fills = [], []
 
     for xyz, intensity, _sweep_time, stamp, span in accumulate_sweeps(
-        args.bag, args.topic, args.messages_per_scan, args.typestore, args.limit
+        args.bag, args.topic, args.messages_per_scan, args.typestore, args.limit,
+        args.stride,
     ):
         if args.flip_z:
             xyz = xyz * np.array([1.0, 1.0, -1.0])
@@ -174,6 +186,7 @@ def convert(args) -> None:
             "sensor_origin": list(map(float, origin)),
             "ego_motion_compensated": False,
             "messages_per_scan": args.messages_per_scan,
+            "stride": args.stride or args.messages_per_scan,
             "num_frames": len(frames),
         },
     )
@@ -198,6 +211,9 @@ def main(argv=None) -> None:
                    choices=("ros2_humble", "ros2_jazzy", "ros1_noetic"))
     p.add_argument("--messages-per-scan", type=int, default=8,
                    help="consecutive messages merged into one sweep (default: 8)")
+    p.add_argument("--stride", type=int, default=None,
+                   help="messages between consecutive sweeps; < --messages-per-scan "
+                        "makes overlapping windows (default: = messages-per-scan)")
     p.add_argument("--limit", type=int, default=None, help="stop after N sweeps")
     # Defaults describe the sim `l1` grid (lower hemisphere), matching
     # `rosbag_to_r2flow.py --sensor l1` and r2flow/data/go2w_sim_l1. The

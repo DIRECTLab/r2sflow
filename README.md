@@ -38,6 +38,7 @@ To train on LiDAR from a Unitree Go2-W simulator rosbag instead, see [this page]
 To fine-tune the pretrained model on simulated navigation bags (ROS 2), see [this page](docs/FINETUNING.md).
 To step a real Go2 scan through a trained flow and visualise it, see [this page](docs/VISUALIZING_FLOW.md).
 To score real→sim transfer quantitatively, see [this page](docs/EVALUATING_TRANSFER.md).
+To train and deploy the conditional real→sim model (DRUM-style pseudo-real pairs), see [this page](docs/REAL2SIM.md).
 
 ### Dependencies
 

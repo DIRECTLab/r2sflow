@@ -68,6 +68,19 @@ def get_go2w_nav_linear_ray_angles(
     return get_linear_ray_angles(H, W, h_up=12.0, h_down=-24.0, device=device)
 
 
+def get_go2w_common_linear_ray_angles(
+    H: int = 64, W: int = 1024, device: torch.device = "cpu"
+):
+    """Shared real/sim grid for real->sim translation: -24..0 deg.
+
+    The intersection of the hospital sim scans (-24..+11 deg) and the real Go2
+    utlidar (L2) after its z-flip (0..-90 deg). 64 x 1024 so the KITTI-360 HDiT
+    weights load unchanged. Kept in sync with `r2flow/data/go2w_common_sim`,
+    `r2flow/data/go2_common_real` and `tools/rosbag2_go2_to_r2flow.py`.
+    """
+    return get_linear_ray_angles(H, W, h_up=0.0, h_down=-24.0, device=device)
+
+
 # Spherical projection geometry per dataset, keyed by `cfg.data.dataset`.
 SPHERICAL_RAY_ANGLES = {
     "kitti_raw": get_hdl64e_linear_ray_angles,
@@ -75,6 +88,10 @@ SPHERICAL_RAY_ANGLES = {
     "go2w_sim": get_go2w_livox_linear_ray_angles,
     "go2w_sim_l1": get_go2w_l1_linear_ray_angles,
     "go2w_nav_sim": get_go2w_nav_linear_ray_angles,
+    "go2w_common_sim": get_go2w_common_linear_ray_angles,
+    "go2_common_real": get_go2w_common_linear_ray_angles,
+    "go2w_l2_sim": get_go2w_common_linear_ray_angles,
+    "go2w_pseudoreal": get_go2w_common_linear_ray_angles,
 }
 
 

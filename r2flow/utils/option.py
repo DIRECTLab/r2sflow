@@ -22,6 +22,9 @@ class ModelConfig:
         None,
     ] = "learnable_embedding"
     dropout: float = 0.0
+    # Extra input channels concatenated to x_t (conditional real->sim model).
+    # 0 = unconditional, as in the original R2Flow.
+    cond_channels: int = 0
 
 
 @dataclass
@@ -30,6 +33,11 @@ class FlowConfig:
     formulation: Literal["otcfm", "icfm"] = "icfm"
     sigma: float = 0.0
     solver: str = "dopri5"
+    # Conditional training only: where x_0 comes from. "noise" is x_0 ~ N(0, I);
+    # "bridge" starts from the condition itself, x_0 = cond + bridge_sigma * eps,
+    # which allows few-step inference.
+    source: Literal["noise", "bridge"] = "noise"
+    bridge_sigma: float = 0.1
 
 
 @dataclass
@@ -54,13 +62,26 @@ class TrainingConfig:
     seed: int = 0
     timestep_distribution: Literal["uniform", "u_shaped", "logit_normal"] = "uniform"
     loss_fn: Literal["l1", "l2", "smooth_l1", "pseudo_huber"] = "l2"
+    # Random azimuth roll + horizontal flip (applied identically to x_1 and cond).
+    augment: bool = False
 
 
 @dataclass
 class DataConfig:
     dataset: Literal[
-        "kitti_raw", "kitti_360", "go2w_sim", "go2w_sim_l1", "go2w_nav_sim"
+        "kitti_raw",
+        "kitti_360",
+        "go2w_sim",
+        "go2w_sim_l1",
+        "go2w_nav_sim",
+        # real->sim on the shared -24..0 deg grid
+        "go2w_common_sim",
+        "go2_common_real",
+        "go2w_l2_sim",
+        "go2w_pseudoreal",  # paired (pseudo-real, sim) scans, see tools/make_pseudoreal.py
     ] = "kitti_360"
+    # Override the builder's data_dir (go2w_pseudoreal: the pair directory).
+    data_dir: str | None = None
     data_format: Literal["logscale", "inverse", "metric", "cartesian"] = "logscale"
     train_reflectance: bool = True
     projection: Literal[

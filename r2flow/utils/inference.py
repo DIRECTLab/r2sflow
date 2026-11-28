@@ -65,6 +65,7 @@ def setup_model(
             dilation=(1, 1, 1, 1),
             positional_embedding=cfg.model.coords_encoding,
             ring=True,
+            cond_channels=cfg.model.cond_channels,
         )
     else:
         raise ValueError(f"Unknown: {cfg.model.architecture}")
